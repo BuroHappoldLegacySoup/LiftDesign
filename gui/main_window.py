@@ -1,11 +1,13 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QListWidget, 
-    QStackedWidget, QApplication, QLabel
+    QStackedWidget, QApplication, QLabel, QPushButton
 )
 from PyQt5.QtCore import Qt
 import sys
 import os
 import json
+from gui.change_history_dialog import ChangeHistoryDialog
+from gui.change_tracker import prepare_baseline
 from gui.building_system_page import BuildingSystemPage
 from gui.lift_system_page import LiftSystemPage
 from gui.lift_drive_control_page import LiftDriveControlPage
@@ -25,6 +27,8 @@ class MainWindow(QMainWindow):
         """
         super().__init__()
         self.setWindowTitle("Lift Design Toolbox_v0")
+        self.project_file_path = None
+        self.projects_base_path = os.path.join(os.path.expanduser('~'), 'LiftDesigner', 'Projects')
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.layout = QHBoxLayout()
@@ -66,6 +70,15 @@ class MainWindow(QMainWindow):
         self.sidebar.setStyleSheet("background-color: rgb(196, 214, 0); color: white; font-weight: bold;")
         self.sidebar_layout.addWidget(self.sidebar)
 
+        # Change History button
+        self.change_history_btn = QPushButton("Change History")
+        self.change_history_btn.setStyleSheet(
+            "background-color: white; border: 3px solid rgb(196, 214, 0); "
+            "font-weight: bold; padding: 8px;"
+        )
+        self.change_history_btn.clicked.connect(self.show_change_history)
+        self.sidebar_layout.addWidget(self.change_history_btn)
+
         # Stack widget setup
         self.stack = QStackedWidget()
         self.page1 = BuildingSystemPage()
@@ -95,6 +108,7 @@ class MainWindow(QMainWindow):
             with open(path_or_name, 'r') as file:
                 data = json.load(file)
             data['FileName'] = project_name
+            data['_baseline'] = prepare_baseline(data)  # For change tracking
             self.page1 = BuildingSystemPage(data)
             # Remove old page and add new one to stack
             self.stack.removeWidget(self.stack.widget(0))
@@ -116,6 +130,13 @@ class MainWindow(QMainWindow):
         # Set project name and adjust label width
         self.project_name_label.setText(project_name)
         self.project_name_label.setFixedWidth(self.sidebar.width())
+
+        # Store project file path for change tracking
+        if is_existing_file:
+            self.project_file_path = path_or_name
+        else:
+            file_name = path_or_name if path_or_name.endswith('.json') else path_or_name + '.json'
+            self.project_file_path = os.path.join(self.projects_base_path, file_name)
         
         # Adjust label height based on content
         self.project_name_label.adjustSize()
@@ -195,10 +216,30 @@ class MainWindow(QMainWindow):
         if self.page7 is None:
             self.page7 = BuildingFloorPage(data)
             self.page7.setMinimumWidth(1100)
+            self.page7.file_saved.connect(self._on_project_saved)
             self.stack.addWidget(self.page7)
         self.stack.setCurrentIndex(6)
         self.sidebar.setCurrentRow(6)
-        #self.page7.update_data(data)
+
+    def _on_project_saved(self, file_path: str):
+        """Update project file path when project is saved (e.g. new project with generated name)."""
+        self.project_file_path = file_path
+
+    def show_change_history(self):
+        """Open the Change History dialog showing alterations to the loaded file."""
+        change_history = []
+        project_name = self.project_name_label.text() or ""
+
+        if self.project_file_path and os.path.exists(self.project_file_path):
+            try:
+                with open(self.project_file_path, 'r') as f:
+                    data = json.load(f)
+                change_history = data.get('ChangeHistory', [])
+            except (json.JSONDecodeError, IOError):
+                pass
+
+        dialog = ChangeHistoryDialog(change_history, project_name, self)
+        dialog.exec_()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

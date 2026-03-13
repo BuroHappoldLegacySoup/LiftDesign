@@ -7,6 +7,7 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator
 import sys, json, os
 from datetime import datetime
+from gui.change_tracker import compute_changes, create_change_records
 
 class EntranceTypeWidget(QFrame):
     def __init__(self, parent=None):
@@ -47,6 +48,7 @@ class EntranceTypeWidget(QFrame):
 
 class BuildingFloorPage(QWidget):
     next_clicked = pyqtSignal(dict)
+    file_saved = pyqtSignal(str)
     
     def __init__(self, user_inputs):
         super().__init__()
@@ -240,6 +242,15 @@ class BuildingFloorPage(QWidget):
         
         self.user_inputs['Floors'] = floors_data
         
+        # Record changes if baseline exists (loaded existing file)
+        baseline = self.user_inputs.pop('_baseline', None)
+        if baseline is not None:
+            changes = compute_changes(baseline, self.user_inputs)
+            if changes:
+                new_records = create_change_records(changes)
+                existing_history = self.user_inputs.get('ChangeHistory', [])
+                self.user_inputs['ChangeHistory'] = existing_history + new_records
+        
         # Save to file
         try:
             base_path = os.path.join(os.path.expanduser('~'), 'LiftDesigner', 'Projects')
@@ -259,6 +270,9 @@ class BuildingFloorPage(QWidget):
             # Save the file
             with open(file_path, 'w') as json_file:
                 json.dump(self.user_inputs, json_file)
+            
+            # Notify main window of save path (for new projects with generated names)
+            self.file_saved.emit(file_path)
             
             # Show success message
             QMessageBox.information(
