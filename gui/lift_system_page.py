@@ -57,10 +57,17 @@ class LiftSystemPage(QWidget):
             'Jerk (m/s³)', 'Travel height (mm)', 'Stops (pcs.)', 'Number of landing doors (pcs.)', 
             'Open-through', 'Adjacent access', 'Cabin width (mm)', 'Cabin depth (mm)', 
             'Clear cabin height (mm)', 'Structural cabin height (mm)', 'Door width (mm)', 
-            'Door height (mm)', 'Shaft width proposal (mm)', 'Shaft width current planning (mm)', 
-            'Shaft depth proposal (mm)', 'Shaft depth current planning (mm)', 
-            'Overhead proposal (mm)', 'Overhead current planning (mm)', 
-            'Shaft pit proposal (mm)', 'Shaft pit current planning (mm)'
+            'Door structural opening width (mm)', 'Door height (mm)', 'Door structural opening height (mm)', 
+            'door type', 'door fixation type', 'Permissible sill load / Loading class', 'LOP type and locaion', 
+            'LIP type and location', 'Lift maintenance panel type', 'Lift maintenance panel location',
+            'Shaft equipment fixation type', 'Shaft width suggested (mm)', 'Shaft width current planning (mm)',
+            'Shaft division type', 'Shaft division width (mm)', 'Shaft depth suggested (mm)', 
+            'Shaft depth current planning (mm)', 'Shaft head suggested (mm)', 'Shaft head current planning (mm)', 
+            'Shaft pit suggested (mm)', 'Shaft pit current planning (mm)', 'Machine room width suggested (mm)', 
+            'Machine room width current planning (mm)', 'Machine room depth suggested (mm)', 
+            'Machine room depth current planning (mm)',
+            'Machine room height suggested (mm)', 'Machine room height current planning (mm)',
+            'Lift vestibule width (mm)', 'Lift vestibule depth (mm)'
         ]
         
         self.system_table.setRowCount(len(input_descriptions))
@@ -123,7 +130,7 @@ class LiftSystemPage(QWidget):
                 widget.addItems(['Passenger Lift', 'Service Lift', 'Waste Lift', 'Freight Lift'])
             elif row == 1:  # System Category
                 widget = QComboBox()
-                widget.addItems(['MR', 'MRL'])
+                widget.addItems(['Traction - MR', 'Traction - MRL', 'Hydraulic - MR', 'Hydraulic - MRL'])
             elif row == 2:  # Code Basis
                 widget = QComboBox()
                 widget.addItems(['BS EN81'])
@@ -132,7 +139,66 @@ class LiftSystemPage(QWidget):
                 widget.addItems(['Simplex', 'Duplex', 'Triplex', 'Quadplex'])
             elif row == 4:  # Counterweight location
                 widget = QComboBox()
-                widget.addItems(['Rear (2)', 'Left (3)', 'Right (4)'])
+                widget.addItems(['CWT-Left', 'CWT-Right', 'CWT-Rear', 'no CWT'])
+            elif row == 7:  # Speed (m/s)
+                widget = QComboBox()
+                widget.addItems(['1,00', '1,60', '2,00', '-'])
+            elif row == 9:  # Door type
+                # Set door type according to CWT position logic
+                widget = QLineEdit()
+                cwt_widget = self.system_table.cellWidget(4, col_position)
+                cwt_value = None
+                if cwt_widget and isinstance(cwt_widget, QComboBox):
+                    cwt_value = cwt_widget.currentText()
+                # Logic: if CWT-Left, "2L"; if CWT-Right, "2R"; else "Non std. CTW"
+                if cwt_value == "CWT-Left":
+                    widget.setText("2L")
+                elif cwt_value == "CWT-Right":
+                    widget.setText("2R")
+                else:
+                    widget.setText("Non std. CTW")
+            elif row == 18:  # Structural cabin height
+                # Row 18 (Structural cabin height) = Row 17 (Clear cabin height) + 100
+                # To support this, we'll set the value in the QLineEdit based on the value of row 17
+                widget = QLineEdit()
+                widget.setValidator(QDoubleValidator())
+                prev_widget = self.system_table.cellWidget(17, col_position)
+                prev_value = None
+                if prev_widget and isinstance(prev_widget, QLineEdit):
+                    try:
+                        prev_value = float(prev_widget.text())
+                    except (ValueError, AttributeError):
+                        prev_value = None
+                if prev_value is not None:
+                    widget.setText(str(prev_value + 100))
+                else:
+                    widget.setText("")
+            
+            elif row == 24: # Door fixation type
+                widget = QComboBox()
+                widget.addItems(['insert rail 40/22', 'insert rail 50/30', 'anchor bolts', 'steel structure'])
+
+            elif row == 25: # Permissable sill load / Loading class
+                widget = QComboBox()
+                widget.addItems(['ASME-A', 'ASME-B', 'ASME-C1', 'ASME-C2', 'EN81-40%', 'EN81-60%', 'EN81-85%'])
+            
+            elif row == 26: # LOP type and location
+                widget = QComboBox()
+                widget.addItems(['in lift door frame L','in lift door frame R', 
+                'flush wall panel L', 'flush wall panel R', 'wall-mounted panel L', 'wall-mounted panel R'])
+            
+            elif row == 27: #LIP type and location
+                widget = QComboBox()
+                widget.addItems(['door frame side vertical', 'door frame above horizontal', 'panel above horizontal', 
+                'panel side vertical'])
+
+            elif row == 28: # Lift maintenance panel type
+                widget = QComboBox()
+                widget.addItems(['inside door jamb', 'segregated panel flush', 'segregated panel wall-mounted'])
+
+                
+
+
             elif row in [13, 14]:  # Open-through and Adjacent access (checkboxes)
                 checkbox = QCheckBox()
                 checkbox.setProperty("row", row)

@@ -49,9 +49,10 @@ class LiftCompliancePage(QWidget):
         
         # Add rows for each input type with units in the description
         input_descriptions = [
-            'EN81-70 Accessibility', 'EN81-71 Vandalism', 'EN81-72 Firefighter elevator', 
-            'EN81-73 Fire emergency return', 'EN81-77 Seismic', 'EN81-58 Fire protection class for landing doors', 
-            'EN81-76/BS 9999 Evacuation lift'
+            'EN81-28 emergency call', 'EN81-70 Accessibility', 'DIN EN17210 / 18040-1 Accessibility', 
+            'EN81-71 Vandalism category', 'EN81-72 Firefighter elevator', 'EN81-73 Fire emergency return', 
+            'EN81-81/76 Evacuation functions', 'EN81-77 Seismic', 'EN81-58 Fire rated landing doors', 
+            'Green building certification compliance'
         ]
         
         self.compliance_table.setRowCount(len(input_descriptions))
