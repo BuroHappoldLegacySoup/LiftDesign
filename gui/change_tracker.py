@@ -9,16 +9,32 @@ from typing import Any, List, Dict, Optional
 # Keys to exclude from comparison (metadata, not user data)
 EXCLUDED_KEYS = {'ChangeHistory', '_baseline', 'FileName'}
 
-# Map data section keys to sidebar page names
+# Map data section keys to sidebar page names (LiftSystems resolved per-field in _path_to_page)
 SECTION_TO_PAGE = {
     "BuildingSystems": "1. Building System Information",
-    "LiftSystems": "2. Lift System Specifications",
-    "LiftDrive": "3. Lift Drive and Control Specifications",
-    "Forces": "4. Force Specifications",
-    "Compliance": "5. Lift Compliance and Safety Standards",
-    "Emergency": "6. Lift Emergency and Safety Systems",
-    "Floors": "7. Building Floor Levels",
+    "LiftDrive": "4. Lift Drive and Control Specifications",
+    "Forces": "5. Force Specifications",
+    "Compliance": "6. Lift Compliance and Safety Standards",
+    "Emergency": "7. Lift Emergency and Safety Systems",
+    "Floors": "8. Building Floor Levels",
 }
+
+# Fields edited on Layout Information page (same keys as layout_information_page.LAYOUT_DESCRIPTIONS)
+LIFT_SYSTEMS_LAYOUT_FIELDS = frozenset({
+    'Cabin width (mm)', 'Cabin depth (mm)',
+    'Clear cabin height (mm)', 'Structural cabin height (mm)', 'Door width (mm)',
+    'Door structural opening width (mm)', 'Door height (mm)', 'Door structural opening height (mm)',
+    'door type', 'door fixation type', 'Permissible sill load / Loading class', 'LOP type and locaion',
+    'LIP type and location', 'Lift maintenance panel type', 'Lift maintenance panel location',
+    'Shaft equipment fixation type', 'Shaft width suggested (mm)', 'Shaft width current planning (mm)',
+    'Shaft division type', 'Shaft division width (mm)', 'Shaft depth suggested (mm)',
+    'Shaft depth current planning (mm)', 'Shaft head suggested (mm)', 'Shaft head current planning (mm)',
+    'Shaft pit suggested (mm)', 'Shaft pit current planning (mm)', 'Machine room width suggested (mm)',
+    'Machine room width current planning (mm)', 'Machine room depth suggested (mm)',
+    'Machine room depth current planning (mm)',
+    'Machine room height suggested (mm)', 'Machine room height current planning (mm)',
+    'Lift vestibule width (mm)', 'Lift vestibule depth (mm)',
+})
 
 
 def _normalize_value(val: Any) -> Any:
@@ -167,8 +183,17 @@ def _path_to_page(path: str) -> str:
     """Extract the page name from a field path (e.g. 'BuildingSystems.0.X' -> '1. Building System Information')."""
     if not path:
         return ""
-    first_part = path.split(".")[0].split("[")[0]
-    return SECTION_TO_PAGE.get(first_part, "")
+    normalized = path.replace("[", ".").replace("]", "")
+    parts = [p for p in normalized.split(".") if p]
+    if not parts:
+        return ""
+    first = parts[0]
+    if first == "LiftSystems" and len(parts) >= 3:
+        field_key = parts[-1]
+        if field_key in LIFT_SYSTEMS_LAYOUT_FIELDS:
+            return "3. Layout Information"
+        return "2. General specification"
+    return SECTION_TO_PAGE.get(first, "")
 
 
 def compute_changes(baseline: Dict, current: Dict) -> List[Dict[str, Any]]:

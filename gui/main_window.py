@@ -9,7 +9,8 @@ import json
 from gui.change_history_dialog import ChangeHistoryDialog
 from gui.change_tracker import prepare_baseline
 from gui.building_system_page import BuildingSystemPage
-from gui.lift_system_page import LiftSystemPage
+from gui.general_specification_page import GeneralSpecificationPage
+from gui.layout_information_page import LayoutInformationPage
 from gui.lift_drive_control_page import LiftDriveControlPage
 from gui.force_spec_page import ForceSpecPage
 from gui.lift_compliance_page import LiftCompliancePage
@@ -57,13 +58,14 @@ class MainWindow(QMainWindow):
         # Create and set up sidebar
         self.sidebar = QListWidget()
         self.sidebar.addItems([
-            "1. Building System Information", 
-            "2. Lift System Specifications",
-            "3. Lift Drive and Control Specifications", 
-            "4. Force Specifications",
-            "5. Lift Compliance and Safety Standards",
-            "6. Lift Emergency and Safety Systems",
-            "7. Building Floor Levels"
+            "1. Building System Information",
+            "2. General specification",
+            "3. Layout Information",
+            "4. Lift Drive and Control Specifications",
+            "5. Force Specifications",
+            "6. Lift Compliance and Safety Standards",
+            "7. Lift Emergency and Safety Systems",
+            "8. Building Floor Levels"
         ])
         self.sidebar.currentRowChanged.connect(self.display_content)
         self.sidebar.setFixedWidth(300)  # Adjust the width of the sidebar here
@@ -82,13 +84,14 @@ class MainWindow(QMainWindow):
         # Stack widget setup
         self.stack = QStackedWidget()
         self.page1 = BuildingSystemPage()
-        self.page1.next_clicked.connect(self.go_to_lift_system_page)
+        self.page1.next_clicked.connect(self.go_to_general_specification_page)
         self.page2 = None
         self.page3 = None
         self.page4 = None
         self.page5 = None
         self.page6 = None
         self.page7 = None
+        self.page8 = None
         self.stack.addWidget(self.page1)
 
         # Add widgets to main layout
@@ -114,7 +117,7 @@ class MainWindow(QMainWindow):
             self.stack.removeWidget(self.stack.widget(0))
             self.stack.insertWidget(0, self.page1)
             # Reconnect the next_clicked signal
-            self.page1.next_clicked.connect(self.go_to_lift_system_page)
+            self.page1.next_clicked.connect(self.go_to_general_specification_page)
         else:
             # For new file, remove .json if present
             project_name = os.path.splitext(path_or_name)[0]
@@ -125,7 +128,7 @@ class MainWindow(QMainWindow):
             self.stack.removeWidget(self.stack.widget(0))
             self.stack.insertWidget(0, self.page1)
             # Reconnect the next_clicked signal
-            self.page1.next_clicked.connect(self.go_to_lift_system_page)
+            self.page1.next_clicked.connect(self.go_to_general_specification_page)
 
         # Set project name and adjust label width
         self.project_name_label.setText(project_name)
@@ -153,73 +156,80 @@ class MainWindow(QMainWindow):
         """
         Display the content based on the selected index.
         """
-        if i == 6 and self.page7 is not None:
-            self.stack.setCurrentIndex(6)
+        if i == 7 and self.page8 is not None:
+            self.stack.setCurrentIndex(7)
         else:
             self.stack.setCurrentIndex(i)
 
-    def go_to_lift_system_page(self, data):
-        """
-        Go to the LiftSystemPage.
-        """
-        self.page2 = LiftSystemPage(data)
+    def go_to_general_specification_page(self, data):
+        """Go to General specification page."""
+        self.page2 = GeneralSpecificationPage(data)
         self.page2.setMinimumWidth(900)
-        self.page2.next_clicked.connect(self.go_to_lift_drive_control_page)
+        self.page2.next_clicked.connect(self.go_to_layout_information_page)
         self.stack.addWidget(self.page2)
         self.stack.setCurrentIndex(1)
         self.sidebar.setCurrentRow(1)
+
+    def go_to_layout_information_page(self, data):
+        """Go to Layout Information page."""
+        self.page3 = LayoutInformationPage(data)
+        self.page3.setMinimumWidth(900)
+        self.page3.next_clicked.connect(self.go_to_lift_drive_control_page)
+        self.stack.addWidget(self.page3)
+        self.stack.setCurrentIndex(2)
+        self.sidebar.setCurrentRow(2)
 
     def go_to_lift_drive_control_page(self, data):
         """
         Go to the LiftDriveControlPage.
         """
-        self.page3 = LiftDriveControlPage(data)
-        self.page3.next_clicked.connect(self.go_to_force_spec_page)
-        self.stack.addWidget(self.page3)
-        self.stack.setCurrentIndex(2)
-        self.sidebar.setCurrentRow(2)
+        self.page4 = LiftDriveControlPage(data)
+        self.page4.next_clicked.connect(self.go_to_force_spec_page)
+        self.stack.addWidget(self.page4)
+        self.stack.setCurrentIndex(3)
+        self.sidebar.setCurrentRow(3)
 
     def go_to_force_spec_page(self, data):
         """
         Go to the ForceSpecPage.
         """
-        self.page4 = ForceSpecPage(data)
-        self.page4.next_clicked.connect(self.go_to_lift_compliance_page)
-        self.stack.addWidget(self.page4)
-        self.stack.setCurrentIndex(3)
-        self.sidebar.setCurrentRow(3)
+        self.page5 = ForceSpecPage(data)
+        self.page5.next_clicked.connect(self.go_to_lift_compliance_page)
+        self.stack.addWidget(self.page5)
+        self.stack.setCurrentIndex(4)
+        self.sidebar.setCurrentRow(4)
 
     def go_to_lift_compliance_page(self, data):
         """
         Go to the LiftCompliancePage.
         """
-        self.page5 = LiftCompliancePage(data)
-        self.page5.next_clicked.connect(self.go_to_lift_emergency_page)
-        self.stack.addWidget(self.page5)
-        self.stack.setCurrentIndex(4)
-        self.sidebar.setCurrentRow(4)
+        self.page6 = LiftCompliancePage(data)
+        self.page6.next_clicked.connect(self.go_to_lift_emergency_page)
+        self.stack.addWidget(self.page6)
+        self.stack.setCurrentIndex(5)
+        self.sidebar.setCurrentRow(5)
 
     def go_to_lift_emergency_page(self, data):
         """
         Go to the LiftEmergencyPage.
         """
-        self.page6 = LiftEmergencyPage(data)
-        self.page6.next_clicked.connect(self.go_to_building_floor_page)
-        self.stack.addWidget(self.page6)
-        self.stack.setCurrentIndex(5)
-        self.sidebar.setCurrentRow(5)
+        self.page7 = LiftEmergencyPage(data)
+        self.page7.next_clicked.connect(self.go_to_building_floor_page)
+        self.stack.addWidget(self.page7)
+        self.stack.setCurrentIndex(6)
+        self.sidebar.setCurrentRow(6)
 
     def go_to_building_floor_page(self, data):
         """
         Go to the BuildingFloorPage.
         """
-        if self.page7 is None:
-            self.page7 = BuildingFloorPage(data)
-            self.page7.setMinimumWidth(1100)
-            self.page7.file_saved.connect(self._on_project_saved)
-            self.stack.addWidget(self.page7)
-        self.stack.setCurrentIndex(6)
-        self.sidebar.setCurrentRow(6)
+        if self.page8 is None:
+            self.page8 = BuildingFloorPage(data)
+            self.page8.setMinimumWidth(1100)
+            self.page8.file_saved.connect(self._on_project_saved)
+            self.stack.addWidget(self.page8)
+        self.stack.setCurrentIndex(7)
+        self.sidebar.setCurrentRow(7)
 
     def _on_project_saved(self, file_path: str):
         """Update project file path when project is saved (e.g. new project with generated name)."""
