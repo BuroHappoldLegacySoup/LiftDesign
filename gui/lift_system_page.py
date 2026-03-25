@@ -196,6 +196,9 @@ class LiftSystemPage(QWidget):
                 widget = QComboBox()
                 widget.addItems(['inside door jamb', 'segregated panel flush', 'segregated panel wall-mounted'])
 
+            elif row == 30: # Shaft equipment fixation type
+                widget = QComboBox()
+                widget.addItems(['insert rail 40/22', 'insert rail 50/30', 'anchor bolts', 'steel structure'])
                 
 
 

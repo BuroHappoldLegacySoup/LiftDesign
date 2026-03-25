@@ -48,10 +48,11 @@ class LiftDriveControlPage(QWidget):
         self.system_table.setHorizontalHeaderLabels(['Description'])
         
         input_descriptions = [
-            'Drive/Motor location', 'Control / Operation panel location', 'Number of trips per hour (1/h)', 'Power network', 
-            'Drive/Motor type', 'Duty cycle (motor) (%)', 'Drive/Motor Power (kW)', 'Connected rated power (kVA)', 
-            'Rated current (A)', 'Starting current (factor ≈ 2) (A)', 'Diversity factor', 'Heat dissipation motor (kJ/h)', 
-            'Energy recovery', 'Temperature machine room / shaft (°C)'
+            'Drive/Motor location', 'Control / Operation panel location', 'Number of trips per hour (1/h)', 
+            'Drive/Motor type', 'Power grid voltage/type (V)', 'Duty cycle (motor) (%)', 'Drive/Motor Power (kW)', 
+            'Connected load (kVA)', 'Rated current (A)', 'Starting current (factor ≈ 2) (A)', 'Energy recovery (y/n)'
+            'Diversity factor (-)', 'Energy consumption (kWh)', 'Heat dissipation motor (kJ)', 
+            'Temperature machine room / shaft (°C)'
         ]
         
         self.system_table.setRowCount(len(input_descriptions))

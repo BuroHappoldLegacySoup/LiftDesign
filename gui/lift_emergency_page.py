@@ -47,10 +47,14 @@ class LiftEmergencyPage(QWidget):
         
         # Add rows for each input type with units in the description
         input_descriptions = [
-            'Smoke extraction', 'Type of fire emergency return', 'Main evacuation floor', 'Alternate evacuation floor', 
-            'Permanent emergency power (A)', 'Emergency power for evacuation (A)', 'Sequence evacuation control', 
-            'Type of emergency power', 'Building automation signals', 'FCC signals from lift', 'CCTV', 
-            'Access control', 'Emergency call', 'Design intention'
+            'Smoke management type (type)', 'Smoke extraction min. size netto (mm²)', 'FAS interfaces as per spec (y/n)', 
+            'Main evacuation floor fire return and EEL EN81-76 (floor no.)', 'Alternate evacuation floor (floor no.)', 
+            'Emergency power (y/n)', 'Cascading evacuation control (y/n)', 'Type of emergency power (type)', 
+            'FCC panel interface as per spec (y/n)', '2-way intercom firefighter lift (y/n)', 
+            'self-rescue method firefighter lift (type)', 'BMS interfaces as per spec (y/n)', 'lift monitoring (y/n)',
+           'ICT/AV interfaces as per spec (y/n)', 'In-car CCTV', 'Access Control interface as per spec (y/n)', 
+           'other Security interfaces as per spec (y/n)', 'PAVA alarm interface car (y/n)', 'Sprinkler in shaft / Shunt trip (y/n)', 
+           'Water management Firefighter and Evacuation lift (type)', 'other functions (type)'
         ]
         
         self.emergency_table.setRowCount(len(input_descriptions))

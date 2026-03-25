@@ -63,7 +63,9 @@ class ForceSpecPage(QWidget):
         self.force_table.setHorizontalHeaderLabels(['Description'])
         
         input_descriptions = [
-            'Force F1, F2 elevator rail segment (kN)', 'Force F3, each buffer (kN)', 'Counterweight safety gear', 
+            f'Rail weight car (kg/m)'
+            'Force F1, F2 elevator rail segment (kN)', 'Number of car buffers (St.)', 'Force F3, each buffer (kN)', 
+            'Counterweight safety gear', 'number of cwt buffers (kg/m)', 'Rail weight cwt (kg/m)',
             'Force F4, per counterweight rail segment (kN)', 'Force F5, per counterweight buffer (kN)', 
             'Force F6, static shaft door (kN)', 'Force F7, static counterweight (kN)', 'Force F8, static cabin (kN)', 
             'Force Fx, cabin rail (kN)', 'Force Fy, cabin rail (kN)', 'Force Fx, counterweight rail (kN)', 
