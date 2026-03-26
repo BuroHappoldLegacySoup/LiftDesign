@@ -26,7 +26,9 @@ class LayoutInformationPage(QWidget):
     ROW_SHAFT_EQUIP_FIX = 15
 
     LAYOUT_DESCRIPTIONS = [
+        'Cabin type/shape',
         'Cabin width (mm)', 'Cabin depth (mm)',
+        'Cladding thickness each wall (mm)',
         'Clear cabin height (mm)', 'Structural cabin height (mm)', 'Door width (mm)',
         'Door structural opening width (mm)', 'Door height (mm)', 'Door structural opening height (mm)',
         'door type', 'door fixation type', 'Permissible sill load / Loading class', 'LOP type and locaion',
@@ -205,6 +207,7 @@ class LayoutInformationPage(QWidget):
             elif row == self.ROW_SHAFT_EQUIP_FIX:
                 widget = QComboBox()
                 widget.addItems(['insert rail 40/22', 'insert rail 50/30', 'anchor bolts', 'steel structure'])
+                
             else:
                 widget = QLineEdit()
                 widget.setValidator(QDoubleValidator())
