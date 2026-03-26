@@ -11,8 +11,8 @@ from gui.change_tracker import prepare_baseline
 from gui.building_system_page import BuildingSystemPage
 from gui.general_specification_page import GeneralSpecificationPage
 from gui.layout_information_page import LayoutInformationPage
-from gui.lift_drive_control_page import LiftDriveControlPage
-from gui.force_spec_page import ForceSpecPage
+from gui.Elecrical_HVAC import LiftDriveControlPage
+from gui.Mechanical_Loading import ForceSpecPage
 from gui.lift_compliance_page import LiftCompliancePage
 from gui.lift_emergency_page import LiftEmergencyPage
 from gui.building_floor_page import BuildingFloorPage
@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
             "1. Building System Information",
             "2. General specification",
             "3. Layout Information",
-            "4. Lift Drive and Control Specifications",
+            "4. Electrical & HVAC",
             "5. Force Specifications",
             "6. Lift Compliance and Safety Standards",
             "7. Lift Emergency and Safety Systems",
@@ -179,9 +179,7 @@ class MainWindow(QMainWindow):
         self.sidebar.setCurrentRow(2)
 
     def go_to_lift_drive_control_page(self, data):
-        """
-        Go to the LiftDriveControlPage.
-        """
+        """Go to Electrical & HVAC (``LiftDriveControlPage``)."""
         self.page4 = LiftDriveControlPage(data)
         self.page4.next_clicked.connect(self.go_to_force_spec_page)
         self.stack.addWidget(self.page4)

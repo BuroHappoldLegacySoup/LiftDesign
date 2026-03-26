@@ -8,12 +8,24 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator
+import os
 import sys
 
-from .lift_types import (
-    cabin_width_for_load_and_shape,
-    cabin_depth_for_load_and_width,
-)
+try:
+    from .lift_types import (
+        cabin_width_for_load_and_shape,
+        cabin_depth_for_load_and_width,
+        load_profile_for_capacity,
+    )
+except ImportError:  # running as ``python gui/layout_information_page.py``
+    _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _repo_root not in sys.path:
+        sys.path.insert(0, _repo_root)
+    from gui.lift_types import (
+        cabin_width_for_load_and_shape,
+        cabin_depth_for_load_and_width,
+        load_profile_for_capacity,
+    )
 
 
 class LayoutInformationPage(QWidget):
@@ -23,8 +35,13 @@ class LayoutInformationPage(QWidget):
     ROW_CABIN_TYPE = 0
     ROW_CABIN_WIDTH = 1
     ROW_CABIN_DEPTH = 2
+    ROW_CLADDING = 3
     ROW_CLEAR_CABIN_HEIGHT = 4
     ROW_STRUCTURAL_CABIN_HEIGHT = 5
+    ROW_DOOR_WIDTH = 6
+    ROW_DOOR_STRUCTURAL_WIDTH = 7
+    ROW_DOOR_HEIGHT = 8
+    ROW_DOOR_STRUCTURAL_HEIGHT = 9
     ROW_DOOR_TYPE = 10
     ROW_DOOR_FIXATION = 11
     ROW_PERMISSIBLE_SILL = 12
@@ -32,8 +49,16 @@ class LayoutInformationPage(QWidget):
     ROW_LIP = 14
     ROW_LIFT_MAINT_TYPE = 15
     ROW_SHAFT_EQUIP_FIX = 17
+    ROW_SHAFT_WIDTH_SUGG = 18
+    ROW_SHAFT_DEPTH_SUGG = 22
+    ROW_SHAFT_HEAD_SUGG = 24
+    ROW_SHAFT_PIT_SUGG = 26
 
     LOAD_CAPACITY_KEY = 'Load capacity (kg)'
+    SPEED_KEY = 'Speed (m/s)'
+    CWT_KEY = 'Counterweight location'
+    ACCESS_TYPE_KEY = 'Acces type'
+    ACCESSIBLE_YN_KEY = 'Accesible rooms/cwt safety (y/n)'
     _COMBO_OPTIONS = {
         ROW_DOOR_FIXATION: ['insert rail 40/22', 'insert rail 50/30', 'anchor bolts', 'steel structure'],
         ROW_PERMISSIBLE_SILL: ['ASME-A', 'ASME-B', 'ASME-C1', 'ASME-C2', 'EN81-40%', 'EN81-60%', 'EN81-85%'],
@@ -87,6 +112,7 @@ class LayoutInformationPage(QWidget):
             return
         v = self._parse_float(str(lifts[i].get(self.LOAD_CAPACITY_KEY, '') or ''))
         if v is None:
+            self._sync_derived_fields(col)
             return
         tw = self.layout_table.cellWidget(self.ROW_CABIN_TYPE, col)
         s = tw.currentText().strip() if isinstance(tw, QComboBox) else ''
@@ -101,31 +127,142 @@ class LayoutInformationPage(QWidget):
         dw = self.layout_table.cellWidget(self.ROW_CABIN_DEPTH, col)
         ww = self.layout_table.cellWidget(self.ROW_CABIN_WIDTH, col)
         if not (0 <= i < len(lifts)) or not isinstance(dw, QLineEdit) or not isinstance(ww, QLineEdit):
+            self._sync_derived_fields(col)
             return
         v = self._parse_float(str(lifts[i].get(self.LOAD_CAPACITY_KEY, '') or ''))
         if v is None:
+            self._sync_derived_fields(col)
             return
         cd = cabin_depth_for_load_and_width(v, ww.text())
         if cd is not None:
             dw.setText(cd)
+        self._sync_derived_fields(col)
 
-    def _door_type_from_cwt(self, i):
-        L = self.user_inputs.get('LiftSystems') or []
-        if not (0 <= i < len(L)):
-            return 'Non std. CTW'
-        return {'CWT-Left': '2L', 'CWT-Right': '2R'}.get(L[i].get('Counterweight location', ''), 'Non std. CTW')
+    def _lift_at_column(self, col):
+        lifts = self.user_inputs.get('LiftSystems') or []
+        i = col - 1
+        if 0 <= i < len(lifts):
+            return lifts[i]
+        return None
 
-    def _update_structural_cabin_height(self, col_position: int):
-        clear_w = self.layout_table.cellWidget(self.ROW_CLEAR_CABIN_HEIGHT, col_position)
-        struct_w = self.layout_table.cellWidget(self.ROW_STRUCTURAL_CABIN_HEIGHT, col_position)
-        if not isinstance(clear_w, QLineEdit) or not isinstance(struct_w, QLineEdit):
+    def _cladding_mm(self, col):
+        w = self.layout_table.cellWidget(self.ROW_CLADDING, col)
+        if not isinstance(w, QLineEdit):
+            return 0.0
+        v = self._parse_float(w.text())
+        return float(v) if v is not None else 0.0
+
+    def _accessible_rooms_yes(self, lift):
+        return str(lift.get(self.ACCESSIBLE_YN_KEY, '') or '').strip().lower() == 'yes'
+
+    def _sync_derived_fields(self, col):
+        """
+        Excel-dependent layout: row 35 cladding, 36 clear, 37 structural, 40–43 doors,
+        44 door type, 53/57 shaft suggested, 59 shaft head suggested, 61 shaft pit suggested.
+        """
+        lift = self._lift_at_column(col)
+        if lift is None:
             return
-        v = self._parse_float(clear_w.text())
-        if v is None:
+        load = self._parse_float(str(lift.get(self.LOAD_CAPACITY_KEY, '') or ''))
+        prof = load_profile_for_capacity(load if load is not None else 0)
+
+        cw = self.layout_table.cellWidget(self.ROW_CABIN_WIDTH, col)
+        clad_w = self.layout_table.cellWidget(self.ROW_CLADDING, col)
+        depth_w = self.layout_table.cellWidget(self.ROW_CABIN_DEPTH, col)
+        clear_w = self.layout_table.cellWidget(self.ROW_CLEAR_CABIN_HEIGHT, col)
+        struct_w = self.layout_table.cellWidget(self.ROW_STRUCTURAL_CABIN_HEIGHT, col)
+        door_w = self.layout_table.cellWidget(self.ROW_DOOR_WIDTH, col)
+        door_sw = self.layout_table.cellWidget(self.ROW_DOOR_STRUCTURAL_WIDTH, col)
+        door_h = self.layout_table.cellWidget(self.ROW_DOOR_HEIGHT, col)
+        door_sh = self.layout_table.cellWidget(self.ROW_DOOR_STRUCTURAL_HEIGHT, col)
+        door_type_w = self.layout_table.cellWidget(self.ROW_DOOR_TYPE, col)
+        shaft_w = self.layout_table.cellWidget(self.ROW_SHAFT_WIDTH_SUGG, col)
+        shaft_d = self.layout_table.cellWidget(self.ROW_SHAFT_DEPTH_SUGG, col)
+        shaft_head_w = self.layout_table.cellWidget(self.ROW_SHAFT_HEAD_SUGG, col)
+        shaft_pit_w = self.layout_table.cellWidget(self.ROW_SHAFT_PIT_SUGG, col)
+
+        cabin_txt = cw.text() if isinstance(cw, QLineEdit) else ''
+
+        c_thick = prof.cladding_thickness_mm()
+        if c_thick is not None and isinstance(clad_w, QLineEdit):
+            clad_w.setText(c_thick)
+        clad = self._cladding_mm(col)
+
+        acc_yes = self._accessible_rooms_yes(lift)
+        access = lift.get(self.ACCESS_TYPE_KEY, '')
+        cwt = lift.get(self.CWT_KEY, '')
+
+        ch = prof.clear_cabin_height_mm(cabin_txt)
+        if isinstance(clear_w, QLineEdit):
+            clear_w.setText(ch if ch is not None else '')
+
+        clear_txt = clear_w.text() if isinstance(clear_w, QLineEdit) else ''
+        sh = prof.structural_cabin_height_mm(clear_txt)
+        if sh is not None and isinstance(struct_w, QLineEdit):
+            struct_w.setText(sh)
+        elif isinstance(struct_w, QLineEdit):
             struct_w.setText('')
-            return
-        nv = v + 100
-        struct_w.setText(str(int(nv)) if nv.is_integer() else str(nv))
+
+        dw = prof.door_width_mm(cabin_txt)
+        if dw is not None and isinstance(door_w, QLineEdit):
+            door_w.setText(dw)
+
+        if isinstance(door_w, QLineEdit) and isinstance(door_sw, QLineEdit):
+            odw = door_w.text().strip()
+            try:
+                dv = float(odw.replace(',', '.'))
+                door_sw.setText(str(int(dv + 280)) if dv == int(dv) else str(dv + 280))
+            except ValueError:
+                pass
+
+        dhi = prof.door_height_mm(clear_txt)
+        if dhi is not None and isinstance(door_h, QLineEdit):
+            door_h.setText(dhi)
+        elif isinstance(door_h, QLineEdit):
+            door_h.setText('')
+
+        door_ht_txt = door_h.text() if isinstance(door_h, QLineEdit) else ''
+        dsh = prof.door_structural_opening_height_mm(door_ht_txt)
+        if dsh is not None and isinstance(door_sh, QLineEdit):
+            door_sh.setText(dsh)
+        elif isinstance(door_sh, QLineEdit):
+            door_sh.setText('')
+
+        dt = prof.door_type_code(cabin_txt, cwt)
+        if dt is not None and isinstance(door_type_w, QLineEdit):
+            door_type_w.setText(dt)
+
+        sw = prof.shaft_width_suggested_mm(cabin_txt, clad, acc_yes)
+        if sw is not None and isinstance(shaft_w, QLineEdit):
+            shaft_w.setText(sw)
+
+        depth_txt = depth_w.text() if isinstance(depth_w, QLineEdit) else ''
+        sd = prof.shaft_depth_suggested_mm(depth_txt, clad, access)
+        if sd is not None and isinstance(shaft_d, QLineEdit):
+            shaft_d.setText(sd)
+
+        struct_txt = struct_w.text() if isinstance(struct_w, QLineEdit) else ''
+        door_w_txt = door_w.text() if isinstance(door_w, QLineEdit) else ''
+        door_type_txt = (
+            door_type_w.text() if isinstance(door_type_w, QLineEdit) else ''
+        ).strip()
+        speed_raw = lift.get(self.SPEED_KEY, '')
+
+        head_s = prof.shaft_head_suggested_mm(
+            struct_txt,
+            speed_raw,
+            cabin_txt,
+            door_w_txt,
+            door_type_txt,
+            clad,
+            acc_yes,
+        )
+        if isinstance(shaft_head_w, QLineEdit):
+            shaft_head_w.setText(head_s if head_s is not None else '')
+
+        pit_s = prof.shaft_pit_suggested_mm(speed_raw)
+        if isinstance(shaft_pit_w, QLineEdit):
+            shaft_pit_w.setText(pit_s if pit_s is not None else '')
 
     def initUI(self):
         self.setMinimumSize(800, 600)
@@ -198,7 +335,6 @@ class LayoutInformationPage(QWidget):
         col_position = self.layout_table.columnCount()
         self.layout_table.insertColumn(col_position)
         self.layout_table.setHorizontalHeaderItem(col_position, QTableWidgetItem(f'Lift {col_position}'))
-        lift_index = col_position - 1
 
         for row in range(self.layout_table.rowCount()):
             if row == self.ROW_CABIN_TYPE:
@@ -213,19 +349,44 @@ class LayoutInformationPage(QWidget):
                 )
             elif row == self.ROW_CABIN_DEPTH:
                 widget = QLineEdit()
+                widget.textChanged.connect(lambda *_a, cp=col_position: self._sync_derived_fields(cp))
+            elif row == self.ROW_CLADDING:
+                widget = QLineEdit()
+                widget.setValidator(QDoubleValidator())
+                widget.textChanged.connect(lambda *_a, cp=col_position: self._sync_derived_fields(cp))
             elif row == self.ROW_CLEAR_CABIN_HEIGHT:
                 widget = QLineEdit()
                 widget.setValidator(QDoubleValidator())
-                widget.textChanged.connect(lambda *_a, cp=col_position: self._update_structural_cabin_height(cp))
+                widget.textChanged.connect(lambda *_a, cp=col_position: self._sync_derived_fields(cp))
             elif row == self.ROW_STRUCTURAL_CABIN_HEIGHT:
                 widget = QLineEdit()
                 widget.setValidator(QDoubleValidator())
-                p = self.layout_table.cellWidget(self.ROW_CLEAR_CABIN_HEIGHT, col_position)
-                pv = self._parse_float(p.text()) if isinstance(p, QLineEdit) else None
-                widget.setText(str(pv + 100) if pv is not None else '')
+                widget.textChanged.connect(
+                    lambda *_a, cp=col_position: self._sync_derived_fields(cp)
+                )
+            elif row in (
+                self.ROW_DOOR_WIDTH,
+                self.ROW_DOOR_STRUCTURAL_WIDTH,
+                self.ROW_DOOR_HEIGHT,
+                self.ROW_DOOR_STRUCTURAL_HEIGHT,
+            ):
+                widget = QLineEdit()
+                if row == self.ROW_DOOR_WIDTH:
+                    widget.textChanged.connect(
+                        lambda *_a, cp=col_position: self._sync_derived_fields(cp)
+                    )
             elif row == self.ROW_DOOR_TYPE:
                 widget = QLineEdit()
-                widget.setText(self._door_type_from_cwt(lift_index))
+                widget.textChanged.connect(
+                    lambda *_a, cp=col_position: self._sync_derived_fields(cp)
+                )
+            elif row in (
+                self.ROW_SHAFT_WIDTH_SUGG,
+                self.ROW_SHAFT_DEPTH_SUGG,
+                self.ROW_SHAFT_HEAD_SUGG,
+                self.ROW_SHAFT_PIT_SUGG,
+            ):
+                widget = QLineEdit()
             elif row in self._COMBO_OPTIONS:
                 w = QComboBox()
                 w.addItems(self._COMBO_OPTIONS[row])
@@ -270,6 +431,7 @@ if __name__ == '__main__':
         'BuildingSystems': [{'Number': '1'}],
         'LiftSystems': [{
             'Counterweight location': 'CWT-Left',
+            'Load capacity (kg)': '630',
             'Cabin width (mm)': '1100',
         }],
     }

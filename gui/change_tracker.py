@@ -12,7 +12,7 @@ EXCLUDED_KEYS = {'ChangeHistory', '_baseline', 'FileName'}
 # Map data section keys to sidebar page names (LiftSystems resolved per-field in _path_to_page)
 SECTION_TO_PAGE = {
     "BuildingSystems": "1. Building System Information",
-    "LiftDrive": "4. Lift Drive and Control Specifications",
+    "LiftDrive": "4. Electrical & HVAC",
     "Forces": "5. Force Specifications",
     "Compliance": "6. Lift Compliance and Safety Standards",
     "Emergency": "7. Lift Emergency and Safety Systems",
@@ -145,7 +145,7 @@ def _path_to_display_name(path: str) -> str:
     section_names = {
         "BuildingSystems": "Building System",
         "LiftSystems": "Lift System",
-        "LiftDrive": "Lift Drive",
+        "LiftDrive": "Electrical & HVAC",
         "Forces": "Force",
         "Compliance": "Compliance",
         "Emergency": "Emergency",
