@@ -4,26 +4,45 @@ Merges into existing user_inputs['LiftSystems'] from General specification.
 """
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QGroupBox, QPushButton, QScrollArea,
-    QTableWidget, QTableWidgetItem, QHeaderView, QHBoxLayout, QLineEdit, QComboBox,
+    QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QComboBox,
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator
 import sys
 
+from .lift_types import (
+    cabin_width_for_load_and_shape,
+    cabin_depth_for_load_and_width,
+)
+
 
 class LayoutInformationPage(QWidget):
     next_clicked = pyqtSignal(dict)
 
-    # Local row indices in layout_table (0-based)
-    ROW_CLEAR_CABIN_HEIGHT = 2
-    ROW_STRUCTURAL_CABIN_HEIGHT = 3
-    ROW_DOOR_TYPE = 8
-    ROW_DOOR_FIXATION = 9
-    ROW_PERMISSIBLE_SILL = 10
-    ROW_LOP = 11
-    ROW_LIP = 12
-    ROW_LIFT_MAINT_TYPE = 13
-    ROW_SHAFT_EQUIP_FIX = 15
+    # Local row indices in layout_table (0-based), must match LAYOUT_DESCRIPTIONS order
+    ROW_CABIN_TYPE = 0
+    ROW_CABIN_WIDTH = 1
+    ROW_CABIN_DEPTH = 2
+    ROW_CLEAR_CABIN_HEIGHT = 4
+    ROW_STRUCTURAL_CABIN_HEIGHT = 5
+    ROW_DOOR_TYPE = 10
+    ROW_DOOR_FIXATION = 11
+    ROW_PERMISSIBLE_SILL = 12
+    ROW_LOP = 13
+    ROW_LIP = 14
+    ROW_LIFT_MAINT_TYPE = 15
+    ROW_SHAFT_EQUIP_FIX = 17
+
+    LOAD_CAPACITY_KEY = 'Load capacity (kg)'
+    _COMBO_OPTIONS = {
+        ROW_DOOR_FIXATION: ['insert rail 40/22', 'insert rail 50/30', 'anchor bolts', 'steel structure'],
+        ROW_PERMISSIBLE_SILL: ['ASME-A', 'ASME-B', 'ASME-C1', 'ASME-C2', 'EN81-40%', 'EN81-60%', 'EN81-85%'],
+        ROW_LOP: ['in lift door frame L', 'in lift door frame R', 'flush wall panel L', 'flush wall panel R',
+                  'wall-mounted panel L', 'wall-mounted panel R'],
+        ROW_LIP: ['door frame side vertical', 'door frame above horizontal', 'panel above horizontal', 'panel side vertical'],
+        ROW_LIFT_MAINT_TYPE: ['inside door jamb', 'segregated panel flush', 'segregated panel wall-mounted'],
+        ROW_SHAFT_EQUIP_FIX: ['insert rail 40/22', 'insert rail 50/30', 'anchor bolts', 'steel structure'],
+    }
 
     LAYOUT_DESCRIPTIONS = [
         'Cabin type/shape',
@@ -61,15 +80,40 @@ class LayoutInformationPage(QWidget):
         except ValueError:
             return None
 
-    def _door_type_from_cwt(self, lift_index: int) -> str:
+    def _apply_cabin_width_for_column(self, col):
         lifts = self.user_inputs.get('LiftSystems') or []
-        if 0 <= lift_index < len(lifts):
-            cwt = lifts[lift_index].get('Counterweight location', '')
-            if cwt == 'CWT-Left':
-                return '2L'
-            if cwt == 'CWT-Right':
-                return '2R'
-        return 'Non std. CTW'
+        i, ww = col - 1, self.layout_table.cellWidget(self.ROW_CABIN_WIDTH, col)
+        if not (0 <= i < len(lifts)) or not isinstance(ww, QLineEdit):
+            return
+        v = self._parse_float(str(lifts[i].get(self.LOAD_CAPACITY_KEY, '') or ''))
+        if v is None:
+            return
+        tw = self.layout_table.cellWidget(self.ROW_CABIN_TYPE, col)
+        s = tw.currentText().strip() if isinstance(tw, QComboBox) else ''
+        cw = cabin_width_for_load_and_shape(v, s)
+        if cw is not None:
+            ww.setText(cw)
+        self._apply_cabin_depth_for_column(col)
+
+    def _apply_cabin_depth_for_column(self, col):
+        lifts = self.user_inputs.get('LiftSystems') or []
+        i = col - 1
+        dw = self.layout_table.cellWidget(self.ROW_CABIN_DEPTH, col)
+        ww = self.layout_table.cellWidget(self.ROW_CABIN_WIDTH, col)
+        if not (0 <= i < len(lifts)) or not isinstance(dw, QLineEdit) or not isinstance(ww, QLineEdit):
+            return
+        v = self._parse_float(str(lifts[i].get(self.LOAD_CAPACITY_KEY, '') or ''))
+        if v is None:
+            return
+        cd = cabin_depth_for_load_and_width(v, ww.text())
+        if cd is not None:
+            dw.setText(cd)
+
+    def _door_type_from_cwt(self, i):
+        L = self.user_inputs.get('LiftSystems') or []
+        if not (0 <= i < len(L)):
+            return 'Non std. CTW'
+        return {'CWT-Left': '2L', 'CWT-Right': '2R'}.get(L[i].get('Counterweight location', ''), 'Non std. CTW')
 
     def _update_structural_cabin_height(self, col_position: int):
         clear_w = self.layout_table.cellWidget(self.ROW_CLEAR_CABIN_HEIGHT, col_position)
@@ -144,6 +188,7 @@ class LayoutInformationPage(QWidget):
                         index = cell_widget.findText(str(value))
                         if index >= 0:
                             cell_widget.setCurrentIndex(index)
+            self._apply_cabin_width_for_column(col)
 
     def initialize_lift_columns(self):
         for _ in range(self.number_of_lifts):
@@ -156,63 +201,41 @@ class LayoutInformationPage(QWidget):
         lift_index = col_position - 1
 
         for row in range(self.layout_table.rowCount()):
-            # elif branches in ascending row order
-            if row == self.ROW_CLEAR_CABIN_HEIGHT:
+            if row == self.ROW_CABIN_TYPE:
+                w = QComboBox()
+                w.addItems(['Deep', 'Wide'])
+                w.currentTextChanged.connect(lambda *_a, cp=col_position: self._apply_cabin_width_for_column(cp))
+                widget = w
+            elif row == self.ROW_CABIN_WIDTH:
+                widget = QLineEdit()
+                widget.textChanged.connect(
+                    lambda *_a, cp=col_position: self._apply_cabin_depth_for_column(cp)
+                )
+            elif row == self.ROW_CABIN_DEPTH:
+                widget = QLineEdit()
+            elif row == self.ROW_CLEAR_CABIN_HEIGHT:
                 widget = QLineEdit()
                 widget.setValidator(QDoubleValidator())
-                widget.textChanged.connect(
-                    lambda _t, cp=col_position: self._update_structural_cabin_height(cp)
-                )
+                widget.textChanged.connect(lambda *_a, cp=col_position: self._update_structural_cabin_height(cp))
             elif row == self.ROW_STRUCTURAL_CABIN_HEIGHT:
                 widget = QLineEdit()
                 widget.setValidator(QDoubleValidator())
-                prev = self.layout_table.cellWidget(self.ROW_CLEAR_CABIN_HEIGHT, col_position)
-                pv = None
-                if prev and isinstance(prev, QLineEdit):
-                    try:
-                        pv = float(prev.text().replace(',', '.'))
-                    except (ValueError, AttributeError):
-                        pv = None
+                p = self.layout_table.cellWidget(self.ROW_CLEAR_CABIN_HEIGHT, col_position)
+                pv = self._parse_float(p.text()) if isinstance(p, QLineEdit) else None
                 widget.setText(str(pv + 100) if pv is not None else '')
             elif row == self.ROW_DOOR_TYPE:
                 widget = QLineEdit()
                 widget.setText(self._door_type_from_cwt(lift_index))
-            elif row == self.ROW_DOOR_FIXATION:
-                widget = QComboBox()
-                widget.addItems(['insert rail 40/22', 'insert rail 50/30', 'anchor bolts', 'steel structure'])
-            elif row == self.ROW_PERMISSIBLE_SILL:
-                widget = QComboBox()
-                widget.addItems([
-                    'ASME-A', 'ASME-B', 'ASME-C1', 'ASME-C2',
-                    'EN81-40%', 'EN81-60%', 'EN81-85%',
-                ])
-            elif row == self.ROW_LOP:
-                widget = QComboBox()
-                widget.addItems([
-                    'in lift door frame L', 'in lift door frame R',
-                    'flush wall panel L', 'flush wall panel R',
-                    'wall-mounted panel L', 'wall-mounted panel R',
-                ])
-            elif row == self.ROW_LIP:
-                widget = QComboBox()
-                widget.addItems([
-                    'door frame side vertical', 'door frame above horizontal',
-                    'panel above horizontal', 'panel side vertical',
-                ])
-            elif row == self.ROW_LIFT_MAINT_TYPE:
-                widget = QComboBox()
-                widget.addItems([
-                    'inside door jamb', 'segregated panel flush', 'segregated panel wall-mounted',
-                ])
-            elif row == self.ROW_SHAFT_EQUIP_FIX:
-                widget = QComboBox()
-                widget.addItems(['insert rail 40/22', 'insert rail 50/30', 'anchor bolts', 'steel structure'])
-                
+            elif row in self._COMBO_OPTIONS:
+                w = QComboBox()
+                w.addItems(self._COMBO_OPTIONS[row])
+                widget = w
             else:
                 widget = QLineEdit()
                 widget.setValidator(QDoubleValidator())
-
             self.layout_table.setCellWidget(row, col_position, widget)
+
+        self._apply_cabin_width_for_column(col_position)
 
     def collect_data_and_go_next(self):
         systems_data = []

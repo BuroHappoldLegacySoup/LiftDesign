@@ -2,12 +2,14 @@
 General specification — inputs from System Type through Adjacent access (per lift).
 """
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QGroupBox, QPushButton, QCheckBox, QScrollArea,
-    QTableWidget, QTableWidgetItem, QHeaderView, QHBoxLayout, QLineEdit, QComboBox,
+    QApplication, QWidget, QVBoxLayout, QGroupBox, QPushButton, QScrollArea,
+    QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QComboBox,
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator
 import sys
+
+from .lift_types import LOAD_CAPACITY_KG, LiftSystemType
 
 
 class GeneralSpecificationPage(QWidget):
@@ -96,11 +98,7 @@ class GeneralSpecificationPage(QWidget):
                     cell_widget = self.system_table.cellWidget(row, col)
                     value = system_data[description]
 
-                    if row in [13, 14]:
-                        checkbox = self.get_checkbox_from_cell_widget(cell_widget)
-                        if checkbox:
-                            checkbox.setChecked(bool(value))
-                    elif isinstance(cell_widget, QLineEdit):
+                    if isinstance(cell_widget, QLineEdit):
                         cell_widget.setText(str(value))
                     elif isinstance(cell_widget, QComboBox):
                         index = cell_widget.findText(str(value))
@@ -119,7 +117,7 @@ class GeneralSpecificationPage(QWidget):
         for row in range(self.system_table.rowCount()):
             if row == 0:
                 widget = QComboBox()
-                widget.addItems(['Passenger Lift', 'Service Lift', 'Waste Lift', 'Freight Lift'])
+                widget.addItems(list(LiftSystemType.ALL))
             elif row == 1:
                 widget = QComboBox()
                 widget.addItems(['Traction - MR', 'Traction - MRL', 'Hydraulic - MR', 'Hydraulic - MRL'])
@@ -132,9 +130,12 @@ class GeneralSpecificationPage(QWidget):
             elif row == 4:
                 widget = QComboBox()
                 widget.addItems(['CWT-Left', 'CWT-Right', 'CWT-Rear', 'no CWT'])
+            elif row == 5:
+                widget = QComboBox()
+                widget.addItems([str(x) for x in LOAD_CAPACITY_KG])
             elif row == 7:
                 widget = QComboBox()
-                widget.addItems(['1,00', '1,60', '2,00', '-'])
+                widget.addItems(['1,00', '1,60', '2,00'])
             elif row == 13:
                 widget = QComboBox()
                 widget.addItems(['Front', 'Rear', 'Front + Rear', 'Front + Side', 'Front + Side + Rear'])
@@ -147,13 +148,6 @@ class GeneralSpecificationPage(QWidget):
 
             self.system_table.setCellWidget(row, col_position, widget)
 
-    def get_checkbox_from_cell_widget(self, cell_widget):
-        if isinstance(cell_widget, QWidget):
-            for child in cell_widget.children():
-                if isinstance(child, QCheckBox):
-                    return child
-        return None
-
     def collect_data_and_go_next(self):
         systems_data = []
         for col in range(1, self.system_table.columnCount()):
@@ -162,10 +156,7 @@ class GeneralSpecificationPage(QWidget):
                 description = self.system_table.item(row, 0).text()
                 cell_widget = self.system_table.cellWidget(row, col)
 
-                if row in [13, 14]:
-                    checkbox = self.get_checkbox_from_cell_widget(cell_widget)
-                    value = checkbox.isChecked() if checkbox else False
-                elif isinstance(cell_widget, QLineEdit):
+                if isinstance(cell_widget, QLineEdit):
                     value = cell_widget.text()
                 elif isinstance(cell_widget, QComboBox):
                     value = cell_widget.currentText()

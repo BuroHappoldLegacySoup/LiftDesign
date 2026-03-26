@@ -156,10 +156,9 @@ class MainWindow(QMainWindow):
         """
         Display the content based on the selected index.
         """
-        if i == 7 and self.page8 is not None:
-            self.stack.setCurrentIndex(7)
-        else:
-            self.stack.setCurrentIndex(i)
+        if i < 0 or i >= self.stack.count():
+            return
+        self.stack.setCurrentIndex(i)
 
     def go_to_general_specification_page(self, data):
         """Go to General specification page."""

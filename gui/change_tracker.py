@@ -21,7 +21,9 @@ SECTION_TO_PAGE = {
 
 # Fields edited on Layout Information page (same keys as layout_information_page.LAYOUT_DESCRIPTIONS)
 LIFT_SYSTEMS_LAYOUT_FIELDS = frozenset({
+    'Cabin type/shape',
     'Cabin width (mm)', 'Cabin depth (mm)',
+    'Cladding thickness each wall (mm)',
     'Clear cabin height (mm)', 'Structural cabin height (mm)', 'Door width (mm)',
     'Door structural opening width (mm)', 'Door height (mm)', 'Door structural opening height (mm)',
     'door type', 'door fixation type', 'Permissible sill load / Loading class', 'LOP type and locaion',
