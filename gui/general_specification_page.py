@@ -42,6 +42,32 @@ class GeneralSpecificationPage(QWidget):
         if 'LiftSystems' in self.user_inputs:
             self.populate_from_input(self.user_inputs['LiftSystems'])
 
+        self._sync_lift_systems_to_user_inputs()
+
+    def _sync_lift_systems_to_user_inputs(self):
+        """Keep ``user_inputs['LiftSystems']`` aligned with the table so other pages see live updates."""
+        systems_data = []
+        for col in range(1, self.system_table.columnCount()):
+            system_data = {}
+            for row in range(self.system_table.rowCount()):
+                description = self.system_table.item(row, 0).text()
+                cell_widget = self.system_table.cellWidget(row, col)
+                if isinstance(cell_widget, QLineEdit):
+                    value = cell_widget.text()
+                elif isinstance(cell_widget, QComboBox):
+                    value = cell_widget.currentText()
+                else:
+                    value = ''
+                system_data[description] = value
+            systems_data.append(system_data)
+        self.user_inputs['LiftSystems'] = systems_data
+
+    def _connect_cell_widget_sync(self, widget):
+        if isinstance(widget, QLineEdit):
+            widget.textChanged.connect(self._sync_lift_systems_to_user_inputs)
+        elif isinstance(widget, QComboBox):
+            widget.currentTextChanged.connect(self._sync_lift_systems_to_user_inputs)
+
     def initUI(self):
         self.setMinimumSize(800, 600)
 
@@ -147,24 +173,10 @@ class GeneralSpecificationPage(QWidget):
                 widget.setValidator(QDoubleValidator())
 
             self.system_table.setCellWidget(row, col_position, widget)
+            self._connect_cell_widget_sync(widget)
 
     def collect_data_and_go_next(self):
-        systems_data = []
-        for col in range(1, self.system_table.columnCount()):
-            system_data = {}
-            for row in range(self.system_table.rowCount()):
-                description = self.system_table.item(row, 0).text()
-                cell_widget = self.system_table.cellWidget(row, col)
-
-                if isinstance(cell_widget, QLineEdit):
-                    value = cell_widget.text()
-                elif isinstance(cell_widget, QComboBox):
-                    value = cell_widget.currentText()
-
-                system_data[description] = value
-            systems_data.append(system_data)
-
-        self.user_inputs['LiftSystems'] = systems_data
+        self._sync_lift_systems_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 

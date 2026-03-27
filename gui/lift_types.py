@@ -107,7 +107,17 @@ def _shaft_head_raw(structural_mm: float, speed_m_s: float, arrangement_over_500
     return structural_mm + 200.0 + 120.0 + 1000.0 + dyn
 
 
+# --- Excel row 61 (shaft pit suggested): columns M–U ↔ row 20 load kg 630…3500 ---
+# Row 22 in each column = Speed (m/s). M–Q also branch on row 20 vs 1600:
+#   M–P (630–1350): load < 1600 → nested IF on {col}22 → 1600/1200/1400 or "non std. Speed".
+#   Q (1600): load < 1600 is false → nested IF on Q22 → 1800/1400/1600 or "non std. Speed".
+# R–S (1850, 2000): IF({col}22=2,1850, IF(1,1500, IF(1.6,1700,"non std. Speed"))).
+# T (2500): IF(T22=2,1850, IF(1,1600, IF(1.6,1800,"non std. Speed"))).
+# U (3500): IF(U22=1,1600,"non std. Speed").
+
+
 def _pit_row_61_branch_under_1600(speed: float) -> str:
+    """Excel row 61 inner branch when ``{col}20 < 1600`` (columns M–P). Uses row 22 (speed)."""
     if _speed_eq(speed, 2.0):
         return "1600"
     if _speed_eq(speed, 1.0):
@@ -118,11 +128,41 @@ def _pit_row_61_branch_under_1600(speed: float) -> str:
 
 
 def _pit_row_61_branch_1600_and_up(speed: float) -> str:
+    """Excel row 61 else-branch when ``{col}20 >= 1600`` (column Q at 1600 kg). Uses row 22 (speed)."""
     if _speed_eq(speed, 2.0):
         return "1800"
     if _speed_eq(speed, 1.0):
         return "1400"
     if _speed_eq(speed, 1.6):
+        return "1600"
+    return "non std. Speed"
+
+
+def _pit_row_61_excel_column_r_or_s(speed: float) -> str:
+    """Excel row 61, columns R–S (1850 / 2000 kg). Depends only on row 22 (speed)."""
+    if _speed_eq(speed, 2.0):
+        return "1850"
+    if _speed_eq(speed, 1.0):
+        return "1500"
+    if _speed_eq(speed, 1.6):
+        return "1700"
+    return "non std. Speed"
+
+
+def _pit_row_61_excel_column_t(speed: float) -> str:
+    """Excel row 61, column T (2500 kg). Depends only on row 22 (speed)."""
+    if _speed_eq(speed, 2.0):
+        return "1850"
+    if _speed_eq(speed, 1.0):
+        return "1600"
+    if _speed_eq(speed, 1.6):
+        return "1800"
+    return "non std. Speed"
+
+
+def _pit_row_61_excel_column_u(speed: float) -> str:
+    """Excel row 61, column U (3500 kg). Depends only on row 22 (speed); only 1.0 m/s is standard."""
+    if _speed_eq(speed, 1.0):
         return "1600"
     return "non std. Speed"
 
@@ -240,8 +280,27 @@ class LiftLoadProfile:
         return str(int(round(_shaft_head_raw(struct, sp, tall))))
 
     def shaft_pit_suggested_mm(self, speed_m_s_raw: object) -> Optional[str]:
-        """Excel row 61."""
+        """
+        Excel row 61 (shaft pit suggested). Each concrete profile implements the formula for
+        its load column (M–U ↔ 630–3500 kg); inputs are template row 22 (Speed m/s) and,
+        for M–Q, the load threshold in row 20 (encoded by the profile class).
+        """
         return None
+
+    # --- Mechanical loading (Excel rows 90–105); M20 = nominal load (kg) for column M–U ---
+
+    def force_f1_f2_elevator_rail_segment_kn(self, travel_height_m: float) -> Optional[int]:
+        """
+        Excel row 91 — Force F1, F2 elevator rail segment (kN).
+
+        ``=ROUND((M25/2*600+2.3*M20*9.81)/1000,0)+1`` where **M25** is travel height (m)
+        and **M20** is load capacity (kg), i.e. ``self.capacity_kg`` for this lift type column.
+        """
+        if travel_height_m <= 0.0:
+            return None
+        m_kg = float(self.capacity_kg)
+        g = 9.81
+        return int(round((travel_height_m / 2.0 * 600.0 + 2.3 * m_kg * g) / 1000.0)) + 1
 
     # --- Electrical & HVAC (Excel rows 79–86; same structure for columns M–U) ---
     _ELEC_V_LINE_V = 400.0 * 1.732 * 0.85  # denominator for rated current (row 81)
@@ -413,8 +472,10 @@ def mechanical_loading_derived_for_lift(
     """
     Same cell structure for columns M–U. Rail weights (rows 90, 96) are UI dropdowns; not included here.
 
-    References (column M): row 91 ``=ROUND((M25/2*600+2.3*M20*9.81)/1000,0)+1``,
-    row 93 ``=ROUND(2.3*M20*9.81/1000*4/M92,0)+1``, row 97–98, 100–101, 103–105 with ``M94``
+    Row 91 (F1/F2 rail segment): implemented as ``LiftLoadProfile.force_f1_f2_elevator_rail_segment_kn``
+    (same Excel formula for each column; **M20** / **M25** come from the profile and inputs).
+
+    References (column M): row 93 ``=ROUND(2.3*M20*9.81/1000*4/M92,0)+1``, row 97–98, 100–101, 103–105 with ``M94``
     ``yes``/``no``; row 99 constant 20.
 
     Rows 93, 98, 100, 101 do **not** use travel height; they are still computed when ``M25`` is empty.
@@ -423,6 +484,8 @@ def mechanical_loading_derived_for_lift(
     load = _mechanical_load_capacity_int(load_kg)
     if load is None:
         return {}
+
+    prof = load_profile_for_capacity(load_kg)
 
     n_car = _mechanical_positive_float(num_car_buffers)
     n_cwt = _mechanical_positive_float(num_cwt_buffers)
@@ -438,8 +501,9 @@ def mechanical_loading_derived_for_lift(
     out: dict[str, str] = {}
 
     if th is not None:
-        f1f2 = int(round((th / 2.0 * 600.0 + 2.3 * m_kg * g) / 1000.0)) + 1
-        out["Force F1, F2 elevator rail segment (kN)"] = str(f1f2)
+        f1f2 = prof.force_f1_f2_elevator_rail_segment_kn(th)
+        if f1f2 is not None:
+            out["Force F1, F2 elevator rail segment (kN)"] = str(f1f2)
         if cwt_no:
             f4 = int(round((th / 2.5 * 600.0) / 1000.0)) + 1
         else:
@@ -550,6 +614,7 @@ class LiftLoad630(LiftLoadProfile):
         return None
 
     def shaft_pit_suggested_mm(self, speed_m_s_raw: object) -> Optional[str]:
+        """Excel M61 (630 kg): ``IF(M20<1600,…)`` → under-1600 branch; depends on row 22 (speed)."""
         sp = _parse_speed_m_s(speed_m_s_raw)
         if sp is None:
             return None
@@ -647,6 +712,7 @@ class LiftLoad1000(LiftLoadProfile):
         return None
 
     def shaft_pit_suggested_mm(self, speed_m_s_raw: object) -> Optional[str]:
+        """Excel N61 (1000 kg): ``IF(N20<1600,…)``; depends on row 22 (speed)."""
         sp = _parse_speed_m_s(speed_m_s_raw)
         if sp is None:
             return None
@@ -738,6 +804,7 @@ class LiftLoad1275(LiftLoadProfile):
         return None
 
     def shaft_pit_suggested_mm(self, speed_m_s_raw: object) -> Optional[str]:
+        """Excel O61 (1275 kg): ``IF(O20<1600,…)``; depends on row 22 (speed)."""
         sp = _parse_speed_m_s(speed_m_s_raw)
         if sp is None:
             return None
@@ -814,6 +881,7 @@ class LiftLoad1350(LiftLoadProfile):
         return None
 
     def shaft_pit_suggested_mm(self, speed_m_s_raw: object) -> Optional[str]:
+        """Excel P61 (1350 kg): ``IF(P20<1600,…)``; depends on row 22 (speed)."""
         sp = _parse_speed_m_s(speed_m_s_raw)
         if sp is None:
             return None
@@ -922,6 +990,7 @@ class LiftLoad1600(LiftLoadProfile):
         return None
 
     def shaft_pit_suggested_mm(self, speed_m_s_raw: object) -> Optional[str]:
+        """Excel Q61 (1600 kg): ``IF(Q20<1600,…)`` is false → ≥1600 branch; depends on row 22 (speed)."""
         sp = _parse_speed_m_s(speed_m_s_raw)
         if sp is None:
             return None
@@ -998,16 +1067,11 @@ class LiftLoad1850(LiftLoadProfile):
         return None
 
     def shaft_pit_suggested_mm(self, speed_m_s_raw: object) -> Optional[str]:
+        """Excel R61 (1850 kg); depends on row 22 (speed) only."""
         sp = _parse_speed_m_s(speed_m_s_raw)
         if sp is None:
             return None
-        if _speed_eq(sp, 2.0):
-            return "1850"
-        if _speed_eq(sp, 1.0):
-            return "1500"
-        if _speed_eq(sp, 1.6):
-            return "1700"
-        return "non std. Speed"
+        return _pit_row_61_excel_column_r_or_s(sp)
 
 
 class LiftLoad2000(LiftLoadProfile):
@@ -1080,16 +1144,11 @@ class LiftLoad2000(LiftLoadProfile):
         return None
 
     def shaft_pit_suggested_mm(self, speed_m_s_raw: object) -> Optional[str]:
+        """Excel S61 (2000 kg); depends on row 22 (speed) only (same formula as R)."""
         sp = _parse_speed_m_s(speed_m_s_raw)
         if sp is None:
             return None
-        if _speed_eq(sp, 2.0):
-            return "1850"
-        if _speed_eq(sp, 1.0):
-            return "1500"
-        if _speed_eq(sp, 1.6):
-            return "1700"
-        return "non std. Speed"
+        return _pit_row_61_excel_column_r_or_s(sp)
 
 
 class LiftLoad2500(LiftLoadProfile):
@@ -1167,16 +1226,11 @@ class LiftLoad2500(LiftLoadProfile):
         return None
 
     def shaft_pit_suggested_mm(self, speed_m_s_raw: object) -> Optional[str]:
+        """Excel T61 (2500 kg); depends on row 22 (speed) only."""
         sp = _parse_speed_m_s(speed_m_s_raw)
         if sp is None:
             return None
-        if _speed_eq(sp, 2.0):
-            return "1850"
-        if _speed_eq(sp, 1.0):
-            return "1600"
-        if _speed_eq(sp, 1.6):
-            return "1800"
-        return "non std. Speed"
+        return _pit_row_61_excel_column_t(sp)
 
 
 class LiftLoad3500(LiftLoadProfile):
@@ -1254,12 +1308,11 @@ class LiftLoad3500(LiftLoadProfile):
         return None
 
     def shaft_pit_suggested_mm(self, speed_m_s_raw: object) -> Optional[str]:
+        """Excel U61 (3500 kg); depends on row 22 (speed) only."""
         sp = _parse_speed_m_s(speed_m_s_raw)
         if sp is None:
             return None
-        if _speed_eq(sp, 1.0):
-            return "1600"
-        return "non std. Speed"
+        return _pit_row_61_excel_column_u(sp)
 
 
 class LiftLoadDefault(LiftLoadProfile):
@@ -1281,6 +1334,7 @@ class LiftLoadDefault(LiftLoadProfile):
         return None
 
     def shaft_pit_suggested_mm(self, speed_m_s_raw: object) -> Optional[str]:
+        """No Excel column mapping for this capacity; row 61 not applied."""
         return None
 
 

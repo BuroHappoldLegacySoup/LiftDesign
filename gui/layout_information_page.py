@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QComboBox,
 )
 from PyQt5.QtCore import pyqtSignal, Qt
-from PyQt5.QtGui import QDoubleValidator
+from PyQt5.QtGui import QDoubleValidator, QShowEvent
 import os
 import sys
 
@@ -50,6 +50,7 @@ class LayoutInformationPage(QWidget):
     ROW_LIFT_MAINT_TYPE = 15
     ROW_SHAFT_EQUIP_FIX = 17
     ROW_SHAFT_WIDTH_SUGG = 18
+    ROW_SHAFT_DIVISION_TYPE = 20
     ROW_SHAFT_DEPTH_SUGG = 22
     ROW_SHAFT_HEAD_SUGG = 24
     ROW_SHAFT_PIT_SUGG = 26
@@ -67,6 +68,7 @@ class LayoutInformationPage(QWidget):
         ROW_LIP: ['door frame side vertical', 'door frame above horizontal', 'panel above horizontal', 'panel side vertical'],
         ROW_LIFT_MAINT_TYPE: ['inside door jamb', 'segregated panel flush', 'segregated panel wall-mounted'],
         ROW_SHAFT_EQUIP_FIX: ['insert rail 40/22', 'insert rail 50/30', 'anchor bolts', 'steel structure'],
+        ROW_SHAFT_DIVISION_TYPE: ['structural wall', 'beam'],
     }
 
     LAYOUT_DESCRIPTIONS = [
@@ -95,6 +97,11 @@ class LayoutInformationPage(QWidget):
 
         if 'LiftSystems' in self.user_inputs:
             self.populate_from_input(self.user_inputs['LiftSystems'])
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        for col in range(1, self.layout_table.columnCount()):
+            self._apply_cabin_width_for_column(col)
 
     def _parse_float(self, text):
         t = (text or '').strip()
@@ -165,6 +172,37 @@ class LayoutInformationPage(QWidget):
             return
         load = self._parse_float(str(lift.get(self.LOAD_CAPACITY_KEY, '') or ''))
         prof = load_profile_for_capacity(load if load is not None else 0)
+
+        _rows_written = (
+            self.ROW_CLADDING,
+            self.ROW_CLEAR_CABIN_HEIGHT,
+            self.ROW_STRUCTURAL_CABIN_HEIGHT,
+            self.ROW_DOOR_WIDTH,
+            self.ROW_DOOR_STRUCTURAL_WIDTH,
+            self.ROW_DOOR_HEIGHT,
+            self.ROW_DOOR_STRUCTURAL_HEIGHT,
+            self.ROW_DOOR_TYPE,
+            self.ROW_SHAFT_WIDTH_SUGG,
+            self.ROW_SHAFT_DEPTH_SUGG,
+            self.ROW_SHAFT_HEAD_SUGG,
+            self.ROW_SHAFT_PIT_SUGG,
+        )
+        _blocked = []
+        for r in _rows_written:
+            w = self.layout_table.cellWidget(r, col)
+            if w is not None and hasattr(w, 'blockSignals'):
+                w.blockSignals(True)
+                _blocked.append(w)
+        try:
+            self._sync_derived_fields_core(col, prof)
+        finally:
+            for w in _blocked:
+                w.blockSignals(False)
+
+    def _sync_derived_fields_core(self, col, prof):
+        lift = self._lift_at_column(col)
+        if lift is None:
+            return
 
         cw = self.layout_table.cellWidget(self.ROW_CABIN_WIDTH, col)
         clad_w = self.layout_table.cellWidget(self.ROW_CLADDING, col)
@@ -358,6 +396,7 @@ class LayoutInformationPage(QWidget):
                 widget = QLineEdit()
                 widget.setValidator(QDoubleValidator())
                 widget.textChanged.connect(lambda *_a, cp=col_position: self._sync_derived_fields(cp))
+                
             elif row == self.ROW_STRUCTURAL_CABIN_HEIGHT:
                 widget = QLineEdit()
                 widget.setValidator(QDoubleValidator())
@@ -371,10 +410,9 @@ class LayoutInformationPage(QWidget):
                 self.ROW_DOOR_STRUCTURAL_HEIGHT,
             ):
                 widget = QLineEdit()
-                if row == self.ROW_DOOR_WIDTH:
-                    widget.textChanged.connect(
-                        lambda *_a, cp=col_position: self._sync_derived_fields(cp)
-                    )
+                widget.textChanged.connect(
+                    lambda *_a, cp=col_position: self._sync_derived_fields(cp)
+                )
             elif row == self.ROW_DOOR_TYPE:
                 widget = QLineEdit()
                 widget.textChanged.connect(

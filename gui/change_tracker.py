@@ -13,9 +13,9 @@ EXCLUDED_KEYS = {'ChangeHistory', '_baseline', 'FileName'}
 SECTION_TO_PAGE = {
     "BuildingSystems": "1. Building System Information",
     "LiftDrive": "4. Electrical & HVAC",
-    "Forces": "5. Force Specifications",
-    "Compliance": "6. Lift Compliance and Safety Standards",
-    "Emergency": "7. Lift Emergency and Safety Systems",
+    "Forces": "5. Mechanical loading",
+    "Compliance": "6. Applicable codes",
+    "Emergency": "7. Interfaces",
     "Floors": "8. Building Floor Levels",
 }
 
@@ -148,7 +148,7 @@ def _path_to_display_name(path: str) -> str:
         "LiftDrive": "Electrical & HVAC",
         "Forces": "Force",
         "Compliance": "Compliance",
-        "Emergency": "Emergency",
+        "Emergency": "Interfaces",
         "Floors": "Floor",
     }
     i = 0

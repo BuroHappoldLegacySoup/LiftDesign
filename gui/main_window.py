@@ -13,8 +13,8 @@ from gui.general_specification_page import GeneralSpecificationPage
 from gui.layout_information_page import LayoutInformationPage
 from gui.Elecrical_HVAC import LiftDriveControlPage
 from gui.Mechanical_Loading import ForceSpecPage
-from gui.lift_compliance_page import LiftCompliancePage
-from gui.lift_emergency_page import LiftEmergencyPage
+from gui.applicable_codes_page import ApplicableCodesPage
+from gui.interfaces_page import InterfacesPage
 from gui.building_floor_page import BuildingFloorPage
 
 
@@ -62,9 +62,9 @@ class MainWindow(QMainWindow):
             "2. General specification",
             "3. Layout Information",
             "4. Electrical & HVAC",
-            "5. Force Specifications",
-            "6. Lift Compliance and Safety Standards",
-            "7. Lift Emergency and Safety Systems",
+            "5. Mechanical loading",
+            "6. Applicable codes",
+            "7. Interfaces",
             "8. Building Floor Levels"
         ])
         self.sidebar.currentRowChanged.connect(self.display_content)
@@ -191,26 +191,26 @@ class MainWindow(QMainWindow):
         Go to the ForceSpecPage.
         """
         self.page5 = ForceSpecPage(data)
-        self.page5.next_clicked.connect(self.go_to_lift_compliance_page)
+        self.page5.next_clicked.connect(self.go_to_applicable_codes_page)
         self.stack.addWidget(self.page5)
         self.stack.setCurrentIndex(4)
         self.sidebar.setCurrentRow(4)
 
-    def go_to_lift_compliance_page(self, data):
+    def go_to_applicable_codes_page(self, data):
         """
-        Go to the LiftCompliancePage.
+        Go to the Applicable codes page (``ApplicableCodesPage``).
         """
-        self.page6 = LiftCompliancePage(data)
-        self.page6.next_clicked.connect(self.go_to_lift_emergency_page)
+        self.page6 = ApplicableCodesPage(data)
+        self.page6.next_clicked.connect(self.go_to_interfaces_page)
         self.stack.addWidget(self.page6)
         self.stack.setCurrentIndex(5)
         self.sidebar.setCurrentRow(5)
 
-    def go_to_lift_emergency_page(self, data):
+    def go_to_interfaces_page(self, data):
         """
-        Go to the LiftEmergencyPage.
+        Go to the Interfaces page (``InterfacesPage``).
         """
-        self.page7 = LiftEmergencyPage(data)
+        self.page7 = InterfacesPage(data)
         self.page7.next_clicked.connect(self.go_to_building_floor_page)
         self.stack.addWidget(self.page7)
         self.stack.setCurrentIndex(6)
