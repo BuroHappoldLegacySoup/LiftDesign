@@ -17,6 +17,7 @@ SECTION_TO_PAGE = {
     "Compliance": "6. Applicable codes",
     "Emergency": "7. Interfaces",
     "Floors": "8. Building Floor Levels",
+    "Cost": "9. Cost",
 }
 
 # Fields edited on Layout Information page (same keys as layout_information_page.LAYOUT_DESCRIPTIONS)
@@ -150,6 +151,7 @@ def _path_to_display_name(path: str) -> str:
         "Compliance": "Compliance",
         "Emergency": "Interfaces",
         "Floors": "Floor",
+        "Cost": "Cost",
     }
     i = 0
     while i < len(parts):

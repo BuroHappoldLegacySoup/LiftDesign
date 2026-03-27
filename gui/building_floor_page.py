@@ -5,9 +5,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator
-import sys, json, os
-from datetime import datetime
-from gui.change_tracker import compute_changes, create_change_records
+import sys
 
 class EntranceTypeWidget(QFrame):
     def __init__(self, parent=None):
@@ -48,7 +46,6 @@ class EntranceTypeWidget(QFrame):
 
 class BuildingFloorPage(QWidget):
     next_clicked = pyqtSignal(dict)
-    file_saved = pyqtSignal(str)
     
     def __init__(self, user_inputs):
         super().__init__()
@@ -241,65 +238,7 @@ class BuildingFloorPage(QWidget):
             current_row += lift['stops']
         
         self.user_inputs['Floors'] = floors_data
-        
-        # Record changes if baseline exists (loaded existing file)
-        baseline = self.user_inputs.pop('_baseline', None)
-        if baseline is not None:
-            changes = compute_changes(baseline, self.user_inputs)
-            if changes:
-                new_records = create_change_records(changes)
-                existing_history = self.user_inputs.get('ChangeHistory', [])
-                self.user_inputs['ChangeHistory'] = existing_history + new_records
-        
-        # Save to file
-        try:
-            base_path = os.path.join(os.path.expanduser('~'), 'LiftDesigner', 'Projects')
-            
-            # Check if FileName exists in user_inputs
-            if 'FileName' in self.user_inputs:
-                file_name = self.user_inputs['FileName']
-                if not file_name.endswith('.json'):
-                    file_name += '.json'
-                file_path = os.path.join(base_path, file_name)
-            else:
-                file_path = self.generate_file_name(base_path, 'LiftDesigner')
-            
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            
-            # Save the file
-            with open(file_path, 'w') as json_file:
-                json.dump(self.user_inputs, json_file)
-            
-            # Notify main window of save path (for new projects with generated names)
-            self.file_saved.emit(file_path)
-            
-            # Show success message
-            QMessageBox.information(
-                self,
-                "Success",
-                f"File successfully saved as:\n{os.path.basename(file_path)}"
-            )
-            
-            self.next_clicked.emit(self.user_inputs)
-            
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to save data: {str(e)}"
-            )
-
-
-    def generate_file_name(self, base_path, prefix):
-        date_str = datetime.now().strftime('%y%m%d')
-        i = 1
-        while True:
-            file_name = f"{date_str}_{prefix}_{i}.json"
-            full_path = os.path.join(base_path, file_name)
-            if not os.path.exists(full_path):
-                return full_path
-            i += 1
+        self.next_clicked.emit(self.user_inputs)
 
 
 if __name__ == '__main__':

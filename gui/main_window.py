@@ -15,6 +15,7 @@ from gui.Elecrical_HVAC import LiftDriveControlPage
 from gui.Mechanical_Loading import ForceSpecPage
 from gui.applicable_codes_page import ApplicableCodesPage
 from gui.interfaces_page import InterfacesPage
+from gui.cost_page import CostPage
 from gui.building_floor_page import BuildingFloorPage
 
 
@@ -65,7 +66,8 @@ class MainWindow(QMainWindow):
             "5. Mechanical loading",
             "6. Applicable codes",
             "7. Interfaces",
-            "8. Building Floor Levels"
+            "8. Building Floor Levels",
+            "9. Cost",
         ])
         self.sidebar.currentRowChanged.connect(self.display_content)
         self.sidebar.setFixedWidth(300)  # Adjust the width of the sidebar here
@@ -92,6 +94,7 @@ class MainWindow(QMainWindow):
         self.page6 = None
         self.page7 = None
         self.page8 = None
+        self.page_cost = None
         self.stack.addWidget(self.page1)
 
         # Add widgets to main layout
@@ -223,10 +226,24 @@ class MainWindow(QMainWindow):
         if self.page8 is None:
             self.page8 = BuildingFloorPage(data)
             self.page8.setMinimumWidth(1100)
-            self.page8.file_saved.connect(self._on_project_saved)
+            self.page8.next_clicked.connect(self.go_to_cost_page)
             self.stack.addWidget(self.page8)
+        else:
+            self.page8.user_inputs = data
         self.stack.setCurrentIndex(7)
         self.sidebar.setCurrentRow(7)
+
+    def go_to_cost_page(self, data):
+        """Cost is the last page; JSON is written here (not on Building Floor)."""
+        if self.page_cost is None:
+            self.page_cost = CostPage(data)
+            self.page_cost.setMinimumWidth(900)
+            self.page_cost.file_saved.connect(self._on_project_saved)
+            self.stack.addWidget(self.page_cost)
+        else:
+            self.page_cost.sync_user_inputs(data)
+        self.stack.setCurrentIndex(8)
+        self.sidebar.setCurrentRow(8)
 
     def _on_project_saved(self, file_path: str):
         """Update project file path when project is saved (e.g. new project with generated name)."""
