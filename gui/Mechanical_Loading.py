@@ -314,8 +314,7 @@ class ForceSpecPage(QWidget):
 
         self._sync_derived_fields(col_position)
 
-    def sync_forces_to_user_inputs(self):
-        """Write mechanical loading table into ``user_inputs``."""
+    def collect_data_and_go_next(self):
         forces_data = []
         for col in range(1, self.force_table.columnCount()):
             force_data = {}
@@ -336,9 +335,6 @@ class ForceSpecPage(QWidget):
             forces_data.append(force_data)
 
         self.user_inputs["Forces"] = forces_data
-
-    def collect_data_and_go_next(self):
-        self.sync_forces_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 

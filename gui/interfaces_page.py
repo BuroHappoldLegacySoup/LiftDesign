@@ -202,8 +202,7 @@ class InterfacesPage(QWidget):
                 elif isinstance(cell_widget, QLineEdit):
                     cell_widget.setText(str(value))
 
-    def sync_emergency_to_user_inputs(self):
-        """Write technical interfaces table into ``user_inputs``."""
+    def collect_data_and_go_next(self):
         emergency_data = []
         for col in range(1, self.interfaces_table.columnCount()):
             emergency_entry = {}
@@ -224,9 +223,6 @@ class InterfacesPage(QWidget):
             emergency_data.append(emergency_entry)
 
         self.user_inputs['Emergency'] = emergency_data
-
-    def collect_data_and_go_next(self):
-        self.sync_emergency_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 

@@ -251,8 +251,7 @@ class LiftDriveControlPage(QWidget):
             else:
                 w.setText("")
 
-    def sync_lift_drive_to_user_inputs(self):
-        """Write Electrical & HVAC table into ``user_inputs``."""
+    def collect_data_and_go_next(self):
         systems_data = []
         for col in range(1, self.system_table.columnCount()):
             system_data = {}
@@ -271,9 +270,6 @@ class LiftDriveControlPage(QWidget):
             systems_data.append(system_data)
 
         self.user_inputs["LiftDrive"] = systems_data
-
-    def collect_data_and_go_next(self):
-        self.sync_lift_drive_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 

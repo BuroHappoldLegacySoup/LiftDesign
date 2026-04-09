@@ -160,24 +160,6 @@ class BuildingFloorPage(QWidget):
         save_button.clicked.connect(self.collect_data_and_go_next)
         scroll_layout.addWidget(save_button)
 
-    def _stops_list_from_lift_systems(self):
-        """Per-lift stop counts from current ``LiftSystems`` (aligned with General spec / flush)."""
-        lifts = self.user_inputs.get('LiftSystems') or []
-        result = []
-        for lift_system in lifts:
-            try:
-                stops_value = lift_system.get('Stops (Stck.)', '')
-                if not stops_value:
-                    stops = 1
-                else:
-                    stops = int(stops_value)
-                    if stops < 1:
-                        stops = 1
-            except (ValueError, TypeError):
-                stops = 1
-            result.append(stops)
-        return result
-
     def process_lift_data(self):
         for i, lift_system in enumerate(self.user_inputs['LiftSystems']):
             try:
@@ -289,47 +271,30 @@ class BuildingFloorPage(QWidget):
             
             current_row += lift['stops']
 
-    def sync_floors_to_user_inputs(self):
-        """Write floor table into ``user_inputs``."""
-        needed = self._stops_list_from_lift_systems()
-        current = [lift['stops'] for lift in self.lifts_data]
-        if needed != current or len(needed) != len(self.lifts_data):
-            self.refresh_from_user_inputs()
-
+    def collect_data_and_go_next(self):
         current_row = 0
         floors_data = []
-
+        
         for lift in self.lifts_data:
             lift_floors = []
+            # Read bottom-to-top so saved list stays ascending floor 0 … stops−1 (export / JSON order)
             for idx in range(lift['stops']):
                 row = current_row + (lift['stops'] - 1 - idx)
-                if row < 0 or row >= self.floor_table.rowCount():
-                    break
-                floor_item = self.floor_table.item(row, 1)
-                floor_str = floor_item.text().strip() if floor_item is not None else ''
-                if not floor_str:
-                    floor_str = str(idx)
-
-                name_w = self.floor_table.cellWidget(row, 2)
-                height_w = self.floor_table.cellWidget(row, 3)
                 type_widget = self.floor_table.cellWidget(row, 4)
                 floor_data = {
-                    'Floor': floor_str,
-                    'Floor Name': name_w.text() if isinstance(name_w, QLineEdit) else '',
-                    'Height (m)': height_w.text() if isinstance(height_w, QLineEdit) else '',
-                    'Entrances': type_widget.get_selected_entrances() if type_widget is not None else [],
+                    'Floor': self.floor_table.item(row, 1).text(),
+                    'Floor Name': self.floor_table.cellWidget(row, 2).text(),
+                    'Height (m)': self.floor_table.cellWidget(row, 3).text(),
+                    'Entrances': type_widget.get_selected_entrances()
                 }
                 lift_floors.append(floor_data)
-
+            
             floors_data.append({
                 f'Lift {lift["lift_number"]}': lift_floors
             })
             current_row += lift['stops']
-
+        
         self.user_inputs['Floors'] = floors_data
-
-    def collect_data_and_go_next(self):
-        self.sync_floors_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 

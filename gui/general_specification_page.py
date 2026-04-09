@@ -65,7 +65,6 @@ class GeneralSpecificationPage(QWidget):
     def _connect_cell_widget_sync(self, widget):
         if isinstance(widget, QLineEdit):
             widget.textChanged.connect(self._sync_lift_systems_to_user_inputs)
-            widget.editingFinished.connect(self._sync_lift_systems_to_user_inputs)
         elif isinstance(widget, QComboBox):
             widget.currentTextChanged.connect(self._sync_lift_systems_to_user_inputs)
 

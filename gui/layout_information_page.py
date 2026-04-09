@@ -436,8 +436,7 @@ class LayoutInformationPage(QWidget):
 
         self._apply_cabin_width_for_column(col_position)
 
-    def merge_layout_into_lift_systems(self):
-        """Merge layout columns into ``LiftSystems`` (general spec first, then layout keys)."""
+    def collect_data_and_go_next(self):
         systems_data = []
         existing = self.user_inputs.get('LiftSystems') or []
 
@@ -461,9 +460,6 @@ class LayoutInformationPage(QWidget):
             systems_data.append(merged)
 
         self.user_inputs['LiftSystems'] = systems_data
-
-    def collect_data_and_go_next(self):
-        self.merge_layout_into_lift_systems()
         self.next_clicked.emit(self.user_inputs)
 
 
