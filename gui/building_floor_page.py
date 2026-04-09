@@ -7,27 +7,54 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator
 import sys
 
+# Used by initUI and refresh; avoid QTableWidget.clear() — it strips horizontal headers (shows 1,2,3…).
+FLOOR_TABLE_HEADERS = ['Lift', 'Floor', 'Floor Name', 'Height (m)', 'Entrances']
+
 class EntranceTypeWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.layout = QHBoxLayout(self)  # Changed to QHBoxLayout for horizontal arrangement
         self.layout.setSpacing(10)  # Add some spacing between checkboxes
         self.layout.setContentsMargins(2, 2, 2, 2)
-        
-        # Create checkboxes
+
+        self.none_cb = QCheckBox("None")
         self.front_cb = QCheckBox("Front")
         self.rear_cb = QCheckBox("Rear")
         self.side_cb = QCheckBox("Side")
-        
-        # Add checkboxes to layout
+
+        self.layout.addWidget(self.none_cb)
         self.layout.addWidget(self.front_cb)
         self.layout.addWidget(self.rear_cb)
         self.layout.addWidget(self.side_cb)
-        
-        # Add stretch to prevent checkboxes from spreading too far apart
         self.layout.addStretch()
 
+        self.none_cb.toggled.connect(self._on_none_toggled)
+        self.front_cb.toggled.connect(self._on_direction_toggled)
+        self.rear_cb.toggled.connect(self._on_direction_toggled)
+        self.side_cb.toggled.connect(self._on_direction_toggled)
+        self.none_cb.setChecked(True)
+
+    def _on_none_toggled(self, checked: bool):
+        if checked:
+            self.front_cb.blockSignals(True)
+            self.rear_cb.blockSignals(True)
+            self.side_cb.blockSignals(True)
+            self.front_cb.setChecked(False)
+            self.rear_cb.setChecked(False)
+            self.side_cb.setChecked(False)
+            self.front_cb.blockSignals(False)
+            self.rear_cb.blockSignals(False)
+            self.side_cb.blockSignals(False)
+
+    def _on_direction_toggled(self, checked: bool):
+        if checked:
+            self.none_cb.blockSignals(True)
+            self.none_cb.setChecked(False)
+            self.none_cb.blockSignals(False)
+
     def get_selected_entrances(self):
+        if self.none_cb.isChecked():
+            return []
         entrances = []
         if self.front_cb.isChecked():
             entrances.append("Front")
@@ -40,6 +67,16 @@ class EntranceTypeWidget(QFrame):
     def set_selected_entrances(self, entrances):
         if not isinstance(entrances, list):
             entrances = [entrances]  # Convert string to list for backward compatibility
+        # Treat empty, explicit "None", or list containing only None as None
+        norm = [str(e).strip() for e in entrances if e is not None and str(e).strip()]
+        is_none = not norm or (len(norm) == 1 and norm[0].lower() == "none")
+        if is_none:
+            self.none_cb.setChecked(True)
+            self.front_cb.setChecked(False)
+            self.rear_cb.setChecked(False)
+            self.side_cb.setChecked(False)
+            return
+        self.none_cb.setChecked(False)
         self.front_cb.setChecked("Front" in entrances)
         self.rear_cb.setChecked("Rear" in entrances)
         self.side_cb.setChecked("Side" in entrances)
@@ -102,8 +139,7 @@ class BuildingFloorPage(QWidget):
         """)
         
         # Set headers
-        headers = ['Lift', 'Floor', 'Floor Name', 'Height (m)', 'Entrances']
-        self.floor_table.setHorizontalHeaderLabels(headers)
+        self.floor_table.setHorizontalHeaderLabels(FLOOR_TABLE_HEADERS)
         
         # Configure header behavior
         header = self.floor_table.horizontalHeader()
@@ -124,10 +160,28 @@ class BuildingFloorPage(QWidget):
         save_button.clicked.connect(self.collect_data_and_go_next)
         scroll_layout.addWidget(save_button)
 
+    def _stops_list_from_lift_systems(self):
+        """Per-lift stop counts from current ``LiftSystems`` (aligned with General spec / flush)."""
+        lifts = self.user_inputs.get('LiftSystems') or []
+        result = []
+        for lift_system in lifts:
+            try:
+                stops_value = lift_system.get('Stops (Stck.)', '')
+                if not stops_value:
+                    stops = 1
+                else:
+                    stops = int(stops_value)
+                    if stops < 1:
+                        stops = 1
+            except (ValueError, TypeError):
+                stops = 1
+            result.append(stops)
+        return result
+
     def process_lift_data(self):
         for i, lift_system in enumerate(self.user_inputs['LiftSystems']):
             try:
-                stops_value = lift_system.get('Stops (pcs.)', '')
+                stops_value = lift_system.get('Stops (Stck.)', '')
                 # Handle empty or invalid values
                 if not stops_value:
                     stops = 1  # Default to 1 stop if empty
@@ -150,18 +204,37 @@ class BuildingFloorPage(QWidget):
         
         self.total_rows = sum(lift['stops'] for lift in self.lifts_data)
 
+    def refresh_from_user_inputs(self):
+        """Rebuild the floor table when LiftSystems (e.g. stops) changes after first load."""
+        self.lifts_data = []
+        self.process_lift_data()
+        # clearContents() only — full clear() also removes header labels (Qt then shows numeric columns).
+        self.floor_table.clearContents()
+        self.floor_table.clearSpans()
+        self.floor_table.setRowCount(self.total_rows)
+        self.floor_table.setHorizontalHeaderLabels(FLOOR_TABLE_HEADERS)
+        self.initialize_table()
+        if 'Floors' in self.user_inputs:
+            self.populate_from_input(self.user_inputs['Floors'])
+
     def populate_from_input(self, floors_data):
         """Populate the table with existing floor specification data"""
         current_row = 0
-        
-        for lift_data in floors_data:
+
+        for lift_idx, lift_data in enumerate(floors_data):
+            if lift_idx >= len(self.lifts_data):
+                break
+            stops = self.lifts_data[lift_idx]['stops']
             # Each lift_data is a dictionary with one key like 'Lift 1'
             lift_number = list(lift_data.keys())[0]  # Get 'Lift 1'
-            floors = lift_data[lift_number]  # Get list of floors for this lift
-            
+            floors = lift_data[lift_number]  # List in ascending order: floor 0, 1, …
+
             for floor_idx, floor_data in enumerate(floors):
-                row = current_row + floor_idx
-                
+                # Table rows: top = highest floor index; saved list is ascending 0 … stops−1
+                row = current_row + (stops - 1 - floor_idx)
+                if row >= self.floor_table.rowCount() or row < current_row:
+                    break
+
                 # Populate Floor Name
                 name_widget = self.floor_table.cellWidget(row, 2)
                 if isinstance(name_widget, QLineEdit):
@@ -177,8 +250,8 @@ class BuildingFloorPage(QWidget):
                 if isinstance(type_widget, EntranceTypeWidget):
                     entrances = floor_data.get('Entrances', [])
                     type_widget.set_selected_entrances(entrances)
-            
-            current_row += len(floors)
+
+            current_row += stops
 
     def initialize_table(self):
         current_row = 0
@@ -190,12 +263,13 @@ class BuildingFloorPage(QWidget):
             self.floor_table.setItem(current_row, 0, lift_item)
             self.floor_table.setSpan(current_row, 0, lift['stops'], 1)
             
-            # Add floor numbers and input widgets for each floor
+            # Add floor numbers and input widgets for each floor (top row = highest; numbers 0 … stops−1)
             for floor in range(lift['stops']):
                 row = current_row + floor
-                
+                display_floor = lift['stops'] - 1 - floor
+
                 # Floor number
-                floor_num = QTableWidgetItem(str(floor + 1))
+                floor_num = QTableWidgetItem(str(display_floor))
                 floor_num.setTextAlignment(Qt.AlignCenter)
                 floor_num.setFlags(floor_num.flags() & ~Qt.ItemIsEditable)
                 self.floor_table.setItem(row, 1, floor_num)
@@ -215,29 +289,47 @@ class BuildingFloorPage(QWidget):
             
             current_row += lift['stops']
 
-    def collect_data_and_go_next(self):
+    def sync_floors_to_user_inputs(self):
+        """Write floor table into ``user_inputs``."""
+        needed = self._stops_list_from_lift_systems()
+        current = [lift['stops'] for lift in self.lifts_data]
+        if needed != current or len(needed) != len(self.lifts_data):
+            self.refresh_from_user_inputs()
+
         current_row = 0
         floors_data = []
-        
+
         for lift in self.lifts_data:
             lift_floors = []
-            for floor in range(lift['stops']):
-                row = current_row + floor
+            for idx in range(lift['stops']):
+                row = current_row + (lift['stops'] - 1 - idx)
+                if row < 0 or row >= self.floor_table.rowCount():
+                    break
+                floor_item = self.floor_table.item(row, 1)
+                floor_str = floor_item.text().strip() if floor_item is not None else ''
+                if not floor_str:
+                    floor_str = str(idx)
+
+                name_w = self.floor_table.cellWidget(row, 2)
+                height_w = self.floor_table.cellWidget(row, 3)
                 type_widget = self.floor_table.cellWidget(row, 4)
                 floor_data = {
-                    'Floor': self.floor_table.item(row, 1).text(),
-                    'Floor Name': self.floor_table.cellWidget(row, 2).text(),
-                    'Height (m)': self.floor_table.cellWidget(row, 3).text(),
-                    'Entrances': type_widget.get_selected_entrances()
+                    'Floor': floor_str,
+                    'Floor Name': name_w.text() if isinstance(name_w, QLineEdit) else '',
+                    'Height (m)': height_w.text() if isinstance(height_w, QLineEdit) else '',
+                    'Entrances': type_widget.get_selected_entrances() if type_widget is not None else [],
                 }
                 lift_floors.append(floor_data)
-            
+
             floors_data.append({
                 f'Lift {lift["lift_number"]}': lift_floors
             })
             current_row += lift['stops']
-        
+
         self.user_inputs['Floors'] = floors_data
+
+    def collect_data_and_go_next(self):
+        self.sync_floors_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 
@@ -245,21 +337,21 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     sample_input = {
     'LiftSystems': [
-        {'Stops (pcs.)': '3'},
-        {'Stops (pcs.)': '2'}
+        {'Stops (Stck.)': '3'},
+        {'Stops (Stck.)': '2'}
     ],
     'Floors': [
         {
             'Lift 1': [
-                {'Floor': '1', 'Floor Name': 'Ground', 'Height (m)': '3.5', 'Entrances': ['Front', 'Side']},
-                {'Floor': '2', 'Floor Name': 'First', 'Height (m)': '3.0', 'Entrances': ['Front']},
-                {'Floor': '3', 'Floor Name': 'Second', 'Height (m)': '3.0', 'Entrances': ['Front', 'Rear', 'Side']}
+                {'Floor': '0', 'Floor Name': 'Ground', 'Height (m)': '3.5', 'Entrances': ['Front', 'Side']},
+                {'Floor': '1', 'Floor Name': 'First', 'Height (m)': '3.0', 'Entrances': ['Front']},
+                {'Floor': '2', 'Floor Name': 'Second', 'Height (m)': '3.0', 'Entrances': ['Front', 'Rear', 'Side']}
             ]
         },
         {
             'Lift 2': [
-                {'Floor': '1', 'Floor Name': 'Ground', 'Height (m)': '3.5', 'Entrances': ['Front', 'Rear']},
-                {'Floor': '2', 'Floor Name': 'First', 'Height (m)': '3.0', 'Entrances': ['Side']}
+                {'Floor': '0', 'Floor Name': 'Ground', 'Height (m)': '3.5', 'Entrances': ['Front', 'Rear']},
+                {'Floor': '1', 'Floor Name': 'First', 'Height (m)': '3.0', 'Entrances': ['Side']}
             ]
         }
     ]

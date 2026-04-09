@@ -181,6 +181,33 @@ LOAD_CAPACITY_KG: Tuple[int, ...] = (
     630, 1000, 1275, 1350, 1600, 1850, 2000, 2500, 3500,
 )
 
+# Excel row 21 — Permissible number of persons (Pers.) vs nominal load kg (columns M–U).
+# Seven standard values from VT template; 2500 / 3500 kg use the same top-tier value as 2000 kg.
+PERMISSIBLE_PERSONS_BY_CAPACITY_KG: dict[int, int] = {
+    630: 17,
+    1000: 18,
+    1275: 21,
+    1350: 25,
+    1600: 27,
+    1850: 33,
+    2000: 47,
+    2500: 47,
+    3500: 47,
+}
+
+
+def permissible_persons_for_capacity(load_kg: object) -> Optional[str]:
+    """Standard permissible persons string for a nominal load (kg), or ``None`` if unknown."""
+    try:
+        raw = str(load_kg).strip().replace(",", ".")
+        if not raw:
+            return None
+        n = int(round(float(raw)))
+    except (ValueError, TypeError, OverflowError):
+        return None
+    v = PERMISSIBLE_PERSONS_BY_CAPACITY_KG.get(n)
+    return str(v) if v is not None else None
+
 
 class LiftLoadProfile:
     """Base profile for one nominal load capacity (kg)."""
@@ -204,6 +231,10 @@ class LiftLoadProfile:
     def cladding_thickness_mm(self) -> Optional[str]:
         """Excel row 35 — default mm per load column."""
         return CLADDING_THICKNESS_MM_BY_CAPACITY.get(self.capacity_kg)
+
+    def permissible_number_of_persons(self) -> Optional[str]:
+        """Excel row 21 — standard persons (Pers.) for this nominal load column (kg)."""
+        return permissible_persons_for_capacity(self.capacity_kg)
 
     def structural_cabin_height_mm(self, clear_cabin_height_str: str) -> Optional[str]:
         """Excel row 37 — usually clear + 100; 2500 kg is fixed 2500 (column T)."""

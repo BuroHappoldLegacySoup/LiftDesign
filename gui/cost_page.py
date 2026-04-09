@@ -33,8 +33,9 @@ class CostPage(QWidget):
         'Cost calculation',
     ]
 
-    def __init__(self, user_inputs):
+    def __init__(self, user_inputs, main_window=None):
         super().__init__()
+        self._main_window = main_window
         self.user_inputs = user_inputs
         self.number_of_lifts = len(user_inputs.get('BuildingSystems') or [])
         self.initUI()
@@ -134,6 +135,18 @@ class CostPage(QWidget):
             i += 1
 
     def collect_data_and_go_next(self):
+        # Commit any active table cell / line edit before reading widgets (Qt can leave edits pending).
+        fw = QApplication.focusWidget()
+        if fw is not None:
+            fw.clearFocus()
+        QApplication.processEvents()
+
+        main = self._main_window or self.window()
+        if main is not None and hasattr(main, "_flush_project_data_from_pages_before_save"):
+            main._flush_project_data_from_pages_before_save()
+        if main is not None and getattr(main, "page1", None) is not None:
+            self.user_inputs = main.page1.user_inputs
+
         cost_data = []
         for col in range(1, self.cost_table.columnCount()):
             entry = {}
@@ -154,7 +167,12 @@ class CostPage(QWidget):
 
         try:
             base_path = os.path.join(os.path.expanduser('~'), 'LiftDesigner', 'Projects')
-            if 'FileName' in self.user_inputs:
+            preferred = getattr(main, "project_file_path", None) if main is not None else None
+            if preferred and str(preferred).strip():
+                file_path = str(preferred).strip()
+                if not file_path.endswith('.json'):
+                    file_path += '.json'
+            elif 'FileName' in self.user_inputs:
                 file_name = self.user_inputs['FileName']
                 if not file_name.endswith('.json'):
                     file_name += '.json'
@@ -162,7 +180,7 @@ class CostPage(QWidget):
             else:
                 file_path = self._generate_file_name(base_path, 'LiftDesigner')
 
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
             with open(file_path, 'w') as json_file:
                 json.dump(self.user_inputs, json_file)
 
@@ -170,7 +188,7 @@ class CostPage(QWidget):
             QMessageBox.information(
                 self,
                 "Success",
-                f"File successfully saved as:\n{os.path.basename(file_path)}",
+                f"File successfully saved to:\n{file_path}",
             )
             self.next_clicked.emit(self.user_inputs)
         except Exception as e:

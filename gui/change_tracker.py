@@ -15,7 +15,7 @@ SECTION_TO_PAGE = {
     "LiftDrive": "4. Electrical & HVAC",
     "Forces": "5. Mechanical loading",
     "Compliance": "6. Applicable codes",
-    "Emergency": "7. Interfaces",
+    "Emergency": "7. Technical Interfaces",
     "Floors": "8. Building Floor Levels",
     "Cost": "9. Cost",
 }
@@ -140,7 +140,7 @@ def _compute_changes_recursive(
 def _path_to_display_name(path: str) -> str:
     """Convert a field path to a human-readable display name."""
     # Handle paths like "BuildingSystems.0.System Name" -> "Building System 1 - System Name"
-    # Or "Floors.0.Lift 1.0.Floor Name" -> "Lift 1, Floor 1 - Floor Name"
+    # Or "Floors.0.Lift 1.0.Floor Name" -> "Lift 1, Floor 0 - Floor Name"
     parts = path.replace("[", ".").replace("]", "").split(".")
     display_parts = []
     section_names = {
@@ -149,7 +149,7 @@ def _path_to_display_name(path: str) -> str:
         "LiftDrive": "Electrical & HVAC",
         "Forces": "Force",
         "Compliance": "Compliance",
-        "Emergency": "Interfaces",
+        "Emergency": "Technical Interfaces",
         "Floors": "Floor",
         "Cost": "Cost",
     }
@@ -169,7 +169,7 @@ def _path_to_display_name(path: str) -> str:
             display_parts.append(part)
             try:
                 floor_idx = int(parts[i + 1])
-                display_parts.append(f"Floor {floor_idx + 1}")
+                display_parts.append(f"Floor {floor_idx}")
                 i += 2
             except (ValueError, IndexError):
                 i += 1

@@ -9,7 +9,7 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator
 import sys
 
-from .lift_types import LOAD_CAPACITY_KG, LiftSystemType
+from .lift_types import LOAD_CAPACITY_KG, LiftSystemType, permissible_persons_for_capacity
 
 
 class GeneralSpecificationPage(QWidget):
@@ -65,8 +65,19 @@ class GeneralSpecificationPage(QWidget):
     def _connect_cell_widget_sync(self, widget):
         if isinstance(widget, QLineEdit):
             widget.textChanged.connect(self._sync_lift_systems_to_user_inputs)
+            widget.editingFinished.connect(self._sync_lift_systems_to_user_inputs)
         elif isinstance(widget, QComboBox):
             widget.currentTextChanged.connect(self._sync_lift_systems_to_user_inputs)
+
+    def _apply_persons_for_load_column(self, col: int, load_text: str) -> None:
+        """Row 21 persons from nominal load (kg) — Excel / VT standard table."""
+        p = permissible_persons_for_capacity(load_text)
+        if p is None:
+            return
+        w = self.system_table.cellWidget(6, col)
+        if isinstance(w, QLineEdit):
+            w.setText(p)
+        self._sync_lift_systems_to_user_inputs()
 
     def initUI(self):
         self.setMinimumSize(800, 600)
@@ -118,18 +129,32 @@ class GeneralSpecificationPage(QWidget):
 
     def populate_from_input(self, systems_data):
         for col, system_data in enumerate(systems_data, start=1):
-            for row in range(self.system_table.rowCount()):
-                description = self.system_table.item(row, 0).text()
-                if description in system_data:
-                    cell_widget = self.system_table.cellWidget(row, col)
-                    value = system_data[description]
+            load_widget = self.system_table.cellWidget(5, col)
+            if isinstance(load_widget, QComboBox):
+                load_widget.blockSignals(True)
+            try:
+                for row in range(self.system_table.rowCount()):
+                    description = self.system_table.item(row, 0).text()
+                    if description in system_data:
+                        cell_widget = self.system_table.cellWidget(row, col)
+                        value = system_data[description]
 
-                    if isinstance(cell_widget, QLineEdit):
-                        cell_widget.setText(str(value))
-                    elif isinstance(cell_widget, QComboBox):
-                        index = cell_widget.findText(str(value))
-                        if index >= 0:
-                            cell_widget.setCurrentIndex(index)
+                        if isinstance(cell_widget, QLineEdit):
+                            cell_widget.setText(str(value))
+                        elif isinstance(cell_widget, QComboBox):
+                            index = cell_widget.findText(str(value))
+                            if index >= 0:
+                                cell_widget.setCurrentIndex(index)
+            finally:
+                if isinstance(load_widget, QComboBox):
+                    load_widget.blockSignals(False)
+            persons_w = self.system_table.cellWidget(6, col)
+            if (
+                isinstance(persons_w, QLineEdit)
+                and not str(persons_w.text()).strip()
+                and isinstance(load_widget, QComboBox)
+            ):
+                self._apply_persons_for_load_column(col, load_widget.currentText())
 
     def initialize_lift_columns(self):
         for _ in range(self.number_of_lifts):
@@ -159,6 +184,9 @@ class GeneralSpecificationPage(QWidget):
             elif row == 5:
                 widget = QComboBox()
                 widget.addItems([str(x) for x in LOAD_CAPACITY_KG])
+                widget.currentTextChanged.connect(
+                    lambda text, c=col_position: self._apply_persons_for_load_column(c, text)
+                )
             elif row == 7:
                 widget = QComboBox()
                 widget.addItems(['1,00', '1,60', '2,00'])
@@ -174,6 +202,10 @@ class GeneralSpecificationPage(QWidget):
 
             self.system_table.setCellWidget(row, col_position, widget)
             self._connect_cell_widget_sync(widget)
+
+        load_w = self.system_table.cellWidget(5, col_position)
+        if isinstance(load_w, QComboBox):
+            self._apply_persons_for_load_column(col_position, load_w.currentText())
 
     def collect_data_and_go_next(self):
         self._sync_lift_systems_to_user_inputs()

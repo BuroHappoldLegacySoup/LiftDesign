@@ -180,7 +180,8 @@ class ApplicableCodesPage(QWidget):
                     if cb is not None:
                         cb.setChecked(bool(value))
 
-    def collect_data_and_go_next(self):
+    def sync_compliance_to_user_inputs(self):
+        """Write applicable codes table into ``user_inputs``."""
         compliance_data = []
         for col in range(1, self.codes_table.columnCount()):
             compliance_entry = {}
@@ -200,6 +201,9 @@ class ApplicableCodesPage(QWidget):
             compliance_data.append(compliance_entry)
 
         self.user_inputs['Compliance'] = compliance_data
+
+    def collect_data_and_go_next(self):
+        self.sync_compliance_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 

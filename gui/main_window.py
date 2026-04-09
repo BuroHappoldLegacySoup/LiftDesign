@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
             "4. Electrical & HVAC",
             "5. Mechanical loading",
             "6. Applicable codes",
-            "7. Interfaces",
+            "7. Technical Interfaces",
             "8. Building Floor Levels",
             "9. Cost",
         ])
@@ -108,6 +108,20 @@ class MainWindow(QMainWindow):
         """
         Load project and display project name
         """
+        # Drop wizard pages from a previous project so they do not keep stale ``user_inputs``.
+        while self.stack.count() > 1:
+            w = self.stack.widget(self.stack.count() - 1)
+            self.stack.removeWidget(w)
+            w.deleteLater()
+        self.page2 = None
+        self.page3 = None
+        self.page4 = None
+        self.page5 = None
+        self.page6 = None
+        self.page7 = None
+        self.page8 = None
+        self.page_cost = None
+
         if is_existing_file:
             # For existing file, extract name from path without .json
             project_name = os.path.splitext(os.path.basename(path_or_name))[0]
@@ -155,12 +169,51 @@ class MainWindow(QMainWindow):
             data = json.load(file)
         return data
 
+    def _bind_wizard_pages_to_project_root(self):
+        """Point every page at ``page1.user_inputs`` so sync writes into the dict we save."""
+        if self.page1 is None:
+            return
+        root = self.page1.user_inputs
+        for attr in (
+            "page2", "page3", "page4", "page5", "page6", "page7", "page8", "page_cost",
+        ):
+            page = getattr(self, attr, None)
+            if page is not None and getattr(page, "user_inputs", None) is not root:
+                page.user_inputs = root
+
+    def _flush_project_data_from_pages_before_save(self):
+        """
+        Copy each wizard page's tables into the shared project dict before writing JSON.
+        Without this, edits made without using "Save and Proceed" on every step are lost.
+        """
+        self._bind_wizard_pages_to_project_root()
+        if self.page1 is not None:
+            self.page1.sync_to_user_inputs()
+        if self.page2 is not None:
+            self.page2._sync_lift_systems_to_user_inputs()
+        if self.page3 is not None:
+            self.page3.merge_layout_into_lift_systems()
+        if self.page4 is not None:
+            self.page4.sync_lift_drive_to_user_inputs()
+        if self.page5 is not None:
+            self.page5.sync_forces_to_user_inputs()
+        if self.page6 is not None:
+            self.page6.sync_compliance_to_user_inputs()
+        if self.page7 is not None:
+            self.page7.sync_emergency_to_user_inputs()
+        if self.page8 is not None:
+            self.page8.sync_floors_to_user_inputs()
+
     def display_content(self, i):
         """
         Display the content based on the selected index.
         """
         if i < 0 or i >= self.stack.count():
             return
+        if i == 7 and self.page8 is not None:
+            self.page8.refresh_from_user_inputs()
+        if i == 8 and self.page_cost is not None:
+            self.page_cost._main_window = self
         self.stack.setCurrentIndex(i)
 
     def go_to_general_specification_page(self, data):
@@ -211,7 +264,7 @@ class MainWindow(QMainWindow):
 
     def go_to_interfaces_page(self, data):
         """
-        Go to the Interfaces page (``InterfacesPage``).
+        Go to the Technical Interfaces page (``InterfacesPage``).
         """
         self.page7 = InterfacesPage(data)
         self.page7.next_clicked.connect(self.go_to_building_floor_page)
@@ -230,18 +283,20 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(self.page8)
         else:
             self.page8.user_inputs = data
+            self.page8.refresh_from_user_inputs()
         self.stack.setCurrentIndex(7)
         self.sidebar.setCurrentRow(7)
 
     def go_to_cost_page(self, data):
         """Cost is the last page; JSON is written here (not on Building Floor)."""
         if self.page_cost is None:
-            self.page_cost = CostPage(data)
+            self.page_cost = CostPage(data, main_window=self)
             self.page_cost.setMinimumWidth(900)
             self.page_cost.file_saved.connect(self._on_project_saved)
             self.stack.addWidget(self.page_cost)
         else:
             self.page_cost.sync_user_inputs(data)
+        self.page_cost._main_window = self
         self.stack.setCurrentIndex(8)
         self.sidebar.setCurrentRow(8)
 

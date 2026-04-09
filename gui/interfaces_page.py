@@ -61,7 +61,7 @@ class InterfacesPage(QWidget):
 
         scroll_layout = QVBoxLayout(scroll_widget)
 
-        interfaces_box = QGroupBox("Interfaces")
+        interfaces_box = QGroupBox("Technical Interfaces")
         interfaces_box.setObjectName("interfaces_box")
         interfaces_box.setStyleSheet(
             "#interfaces_box {background-color: white; border: 3px solid rgb(196, 214, 0); font-size: 15px; font-weight: bold; border-radius: 6px; margin-top: 12px;} "
@@ -202,7 +202,8 @@ class InterfacesPage(QWidget):
                 elif isinstance(cell_widget, QLineEdit):
                     cell_widget.setText(str(value))
 
-    def collect_data_and_go_next(self):
+    def sync_emergency_to_user_inputs(self):
+        """Write technical interfaces table into ``user_inputs``."""
         emergency_data = []
         for col in range(1, self.interfaces_table.columnCount()):
             emergency_entry = {}
@@ -223,6 +224,9 @@ class InterfacesPage(QWidget):
             emergency_data.append(emergency_entry)
 
         self.user_inputs['Emergency'] = emergency_data
+
+    def collect_data_and_go_next(self):
+        self.sync_emergency_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 
