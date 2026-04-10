@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+import unicodedata
 from typing import Any
 
 from PyQt5.QtCore import QLocale
@@ -40,37 +41,63 @@ def _line_edit_text_for_numeric_value(value: Any) -> str:
     s = str(value).strip() if value is not None else ''
     return s.replace(',', '.') if s else s
 
+
+def _set_line_edit_text_bypassing_validator(widget: QLineEdit, text: str) -> None:
+    """Programmatic load: validator can block ``setText`` for non-numeric strings."""
+    v = widget.validator()
+    widget.setValidator(None)
+    widget.setText(text)
+    widget.setValidator(v if v is not None else _general_spec_double_validator())
+
 # Alternate keys sometimes found in older or hand-edited JSON (Unicode / spelling).
+# Primary dict keys are canonical (no units in the key); legacy keys are migrated in
+# ``gui.project_lift_schema.migrate_general_specification_dict``.
 _GENERAL_SPEC_KEY_ALIASES: dict[str, tuple[str, ...]] = {
-    'Acceleration (m/s²)': ('Acceleration (m/s2)', 'Acceleration (m/s^2)'),
-    'Jerk (m/s³)': ('Jerk (m/s3)', 'Jerk (m/s^3)'),
-    'Acces type': ('Access type',),
-    'Accesible rooms/cwt safety (y/n)': ('Accessible rooms/cwt safety (y/n)',),
+    'Acceleration': (
+        'Acceleration (m/s²)', 'Acceleration (m/s2)', 'Acceleration (m/s^2)',
+    ),
+    'Jerk': ('Jerk (m/s³)', 'Jerk (m/s3)', 'Jerk (m/s^3)'),
+    'Access type': ('Acces type',),
+    'Accessible rooms/cwt safety': (
+        'Accesible rooms/cwt safety (y/n)',
+        'Accessible rooms/cwt safety (y/n)',
+    ),
 }
+
+# (json_key, description label, unit label). JSON uses ``json_key`` only — units are not part of the key.
+GENERAL_SPEC_ROWS: tuple[tuple[str, str, str], ...] = (
+    ('System Type', 'System Type', ''),
+    ('System Category', 'System Category', ''),
+    ('Code Basis', 'Code Basis', ''),
+    ('Control / Group', 'Control / Group', ''),
+    ('Counterweight location', 'Counterweight location', ''),
+    ('Load capacity', 'Load capacity', 'kg'),
+    ('Permissible number of persons', 'Permissible number of persons', 'Pers.'),
+    ('Speed', 'Speed', 'm/s'),
+    ('Acceleration', 'Acceleration', 'm/s²'),
+    ('Jerk', 'Jerk', 'm/s³'),
+    ('Travel height', 'Travel height', 'm'),
+    ('Stops', 'Stops', 'Stck.'),
+    ('Number of floors', 'Number of floors', 'Stck.'),
+    ('Number of shaft doors', 'Number of shaft doors', 'Stck.'),
+    ('Access type', 'Access type', ''),
+    ('Accessible rooms/cwt safety', 'Accessible rooms / cwt safety', 'y/n'),
+)
+
+
+def _normalize_general_spec_key(s: str) -> str:
+    """Unify Unicode so JSON keys match table labels (e.g. m/s² vs m/s2 after NFKC)."""
+    t = unicodedata.normalize('NFKC', s)
+    return t.strip()
 
 
 class GeneralSpecificationPage(QWidget):
     next_clicked = pyqtSignal(dict)
     back_clicked = pyqtSignal()
 
-    GENERAL_DESCRIPTIONS = [
-        'System Type',
-        'System Category',
-        'Code Basis',
-        'Control / Group',
-        'Counterweight location',
-        'Load capacity (kg)',
-        'Permissible number of persons (Pers.)',
-        'Speed (m/s)',
-        'Acceleration (m/s²)',
-        'Jerk (m/s³)',
-        'Travel height (m)',
-        'Stops (Stck.)',
-        'Number of floors (Stck.)',
-        'Number of shaft doors (Stck.)',
-        'Acces type', 
-        'Accesible rooms/cwt safety (y/n)'
-    ]
+    @staticmethod
+    def _json_key_for_row(row: int) -> str:
+        return GENERAL_SPEC_ROWS[row][0]
 
     def __init__(self, user_inputs):
         super().__init__()
@@ -79,13 +106,17 @@ class GeneralSpecificationPage(QWidget):
         self.number_of_lifts = self._needed_lift_columns()
         self.initUI()
 
+        # Always populate from ``GeneralSpecification`` (padded to column count). Do **not** branch on
+        # ``if systems:`` — an empty list [] skipped populate and ran _sync, overwriting file-backed
+        # values with default widgets (e.g. load 630 / persons 17).
         systems = copy.deepcopy(self.user_inputs.get(KEY_GENERAL_SPECIFICATION) or [])
-        if systems:
-            self.populate_from_input(systems)
-            self._apply_general_spec_widgets_to_lift_systems_merge(systems)
-            self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems
-        else:
-            self._sync_lift_systems_to_user_inputs()
+        while len(systems) < self.number_of_lifts:
+            systems.append({})
+        while len(systems) > self.number_of_lifts:
+            systems.pop()
+        self.populate_from_input(systems)
+        self._apply_general_spec_widgets_to_lift_systems_merge(systems)
+        self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems
 
         self._update_json_debug_panel()
 
@@ -93,11 +124,11 @@ class GeneralSpecificationPage(QWidget):
         """Keep general-spec columns in ``user_inputs['GeneralSpecification']`` aligned with the table."""
         existing = self.user_inputs.get(KEY_GENERAL_SPECIFICATION) or []
         systems_data = []
-        for col in range(1, self.system_table.columnCount()):
-            idx = col - 1
+        for col in range(2, self.system_table.columnCount()):
+            idx = col - 2
             merged = dict(existing[idx]) if idx < len(existing) else {}
             for row in range(self.system_table.rowCount()):
-                description = self.system_table.item(row, 0).text()
+                json_key = self._json_key_for_row(row)
                 cell_widget = self.system_table.cellWidget(row, col)
                 if isinstance(cell_widget, QLineEdit):
                     value = cell_widget.text()
@@ -105,7 +136,20 @@ class GeneralSpecificationPage(QWidget):
                     value = cell_widget.currentText()
                 else:
                     value = ''
-                merged[description] = value
+                v = value.strip() if isinstance(value, str) else value
+                if v != '':
+                    merged[json_key] = value
+                    continue
+                if isinstance(cell_widget, QLineEdit):
+                    stored = self._get_spec_value(merged, json_key)
+                    if (
+                        stored is not _MISSING
+                        and stored not in (None, '')
+                        and not cell_widget.isModified()
+                    ):
+                        merged[json_key] = stored
+                        continue
+                merged[json_key] = ''
             systems_data.append(merged)
         self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems_data
 
@@ -123,12 +167,23 @@ class GeneralSpecificationPage(QWidget):
         return max(b, g, lay, 1)
 
     @staticmethod
-    def _get_spec_value(system_data: dict, description: str) -> Any:
-        if description in system_data:
-            return system_data[description]
-        for alt in _GENERAL_SPEC_KEY_ALIASES.get(description, ()):
+    def _get_spec_value(system_data: dict, json_key: str) -> Any:
+        if json_key in system_data:
+            return system_data[json_key]
+        for alt in _GENERAL_SPEC_KEY_ALIASES.get(json_key, ()):
             if alt in system_data:
                 return system_data[alt]
+        nd = _normalize_general_spec_key(json_key)
+        for k, v in system_data.items():
+            if not isinstance(k, str):
+                continue
+            if _normalize_general_spec_key(k) == nd:
+                return v
+        for alt in _GENERAL_SPEC_KEY_ALIASES.get(json_key, ()):
+            nad = _normalize_general_spec_key(alt)
+            for k, v in system_data.items():
+                if isinstance(k, str) and _normalize_general_spec_key(k) == nad:
+                    return v
         return _MISSING
 
     @staticmethod
@@ -149,11 +204,11 @@ class GeneralSpecificationPage(QWidget):
 
     def _ensure_lift_columns(self, n: int) -> None:
         """Add or remove data columns so the table matches ``n`` lifts."""
-        data_cols = max(0, self.system_table.columnCount() - 1)
+        data_cols = max(0, self.system_table.columnCount() - 2)
         while data_cols < n:
             self.add_lift_column()
             data_cols += 1
-        while data_cols > n and self.system_table.columnCount() > 1:
+        while data_cols > n and self.system_table.columnCount() > 2:
             self.system_table.removeColumn(self.system_table.columnCount() - 1)
             data_cols -= 1
 
@@ -164,13 +219,13 @@ class GeneralSpecificationPage(QWidget):
         :meth:`_sync_lift_systems_to_user_inputs` after :meth:`populate_from_input` would then replace
         good dict entries with ``""`` while the file on disk still has the old data.
         """
-        for col in range(1, self.system_table.columnCount()):
-            idx = col - 1
+        for col in range(2, self.system_table.columnCount()):
+            idx = col - 2
             while len(systems) <= idx:
                 systems.append({})
             base = systems[idx]
             for row in range(self.system_table.rowCount()):
-                description = self.system_table.item(row, 0).text()
+                json_key = self._json_key_for_row(row)
                 cell_widget = self.system_table.cellWidget(row, col)
                 if isinstance(cell_widget, QLineEdit):
                     v = cell_widget.text().strip()
@@ -179,12 +234,13 @@ class GeneralSpecificationPage(QWidget):
                 else:
                     v = ''
                 if v != '':
-                    base[description] = v
+                    base[json_key] = v
                     continue
-                stored = base.get(description)
-                if stored not in (None, ''):
+                stored = self._get_spec_value(base, json_key)
+                if stored is not _MISSING and stored not in (None, ''):
+                    base[json_key] = stored
                     continue
-                base[description] = ''
+                base[json_key] = ''
 
     def refresh_from_project_data(self) -> None:
         """Re-read ``user_inputs['GeneralSpecification']`` into the table (e.g. after JSON load or re-entry)."""
@@ -192,6 +248,10 @@ class GeneralSpecificationPage(QWidget):
         self.number_of_lifts = self._needed_lift_columns()
         self._ensure_lift_columns(self.number_of_lifts)
         systems = copy.deepcopy(self.user_inputs.get(KEY_GENERAL_SPECIFICATION) or [])
+        while len(systems) < self.number_of_lifts:
+            systems.append({})
+        while len(systems) > self.number_of_lifts:
+            systems.pop()
         self.populate_from_input(systems)
         self._apply_general_spec_widgets_to_lift_systems_merge(systems)
         self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems
@@ -246,18 +306,22 @@ class GeneralSpecificationPage(QWidget):
         system_layout = QVBoxLayout(system_box)
 
         self.system_table = QTableWidget()
-        self.system_table.setColumnCount(1)
-        self.system_table.setHorizontalHeaderLabels(['Description'])
-        self.system_table.setRowCount(len(self.GENERAL_DESCRIPTIONS))
+        self.system_table.setColumnCount(2)
+        self.system_table.setHorizontalHeaderLabels(['Description', 'Unit'])
+        self.system_table.setRowCount(len(GENERAL_SPEC_ROWS))
 
-        for row, description in enumerate(self.GENERAL_DESCRIPTIONS):
-            item = QTableWidgetItem(description)
+        for row, (_jk, label, unit) in enumerate(GENERAL_SPEC_ROWS):
+            item = QTableWidgetItem(label)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             self.system_table.setItem(row, 0, item)
+            u_item = QTableWidgetItem(unit if unit else '—')
+            u_item.setFlags(u_item.flags() & ~Qt.ItemIsEditable)
+            self.system_table.setItem(row, 1, u_item)
 
         self.system_table.horizontalHeader().setStretchLastSection(True)
         self.system_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.system_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.system_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         system_layout.addWidget(self.system_table)
 
@@ -301,28 +365,28 @@ class GeneralSpecificationPage(QWidget):
     def populate_from_input(self, systems_data):
         # Avoid textChanged → _sync_lift_systems_to_user_inputs while only some columns are filled.
         blocked = []
-        for col in range(1, self.system_table.columnCount()):
+        for col in range(2, self.system_table.columnCount()):
             for row in range(self.system_table.rowCount()):
                 w = self.system_table.cellWidget(row, col)
                 if w is not None:
                     w.blockSignals(True)
                     blocked.append(w)
         try:
-            for col, system_data in enumerate(systems_data, start=1):
+            for col, system_data in enumerate(systems_data, start=2):
                 load_widget = self.system_table.cellWidget(5, col)
                 for row in range(self.system_table.rowCount()):
-                    description = self.system_table.item(row, 0).text()
-                    value = self._get_spec_value(system_data, description)
+                    json_key = self._json_key_for_row(row)
+                    value = self._get_spec_value(system_data, json_key)
                     if value is _MISSING:
                         continue
-                    if (
-                        description == 'Accesible rooms/cwt safety (y/n)'
-                        and isinstance(value, bool)
-                    ):
+                    if json_key == 'Accessible rooms/cwt safety' and isinstance(value, bool):
                         value = 'yes' if value else 'no'
                     cell_widget = self.system_table.cellWidget(row, col)
                     if isinstance(cell_widget, QLineEdit):
-                        cell_widget.setText(_line_edit_text_for_numeric_value(value))
+                        _set_line_edit_text_bypassing_validator(
+                            cell_widget,
+                            _line_edit_text_for_numeric_value(value),
+                        )
                     elif isinstance(cell_widget, QComboBox):
                         self._set_combo_value(cell_widget, value)
                 persons_w = self.system_table.cellWidget(6, col)

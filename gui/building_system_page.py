@@ -60,9 +60,9 @@ class BuildingSystemPage(QWidget):
         
         # Add rows for each input type
         input_descriptions = [
-            'Number', 'System Name', 'Building Part', 'Building Section', 'Grid Position', 
-            'Plan Code', 'Drawing Number, Internal', 'Factory Number', 'System category', 'Functions', 
-            'Construction use', 'Brand', 'Factory number'
+            'Number', 'System Name', 'Building Part', 'Building Section', 'Grid Position',
+            'Plan Code', 'Drawing Number, Internal', 'Factory Number', 'System category', 'Functions',
+            'Construction use', 'Brand',
         ]
         
         self.system_table.setRowCount(len(input_descriptions))

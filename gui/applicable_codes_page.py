@@ -65,8 +65,8 @@ class ApplicableCodesPage(QWidget):
         codes_layout = QVBoxLayout(codes_box)
 
         self.codes_table = QTableWidget()
-        self.codes_table.setColumnCount(1)
-        self.codes_table.setHorizontalHeaderLabels(['Description'])
+        self.codes_table.setColumnCount(2)
+        self.codes_table.setHorizontalHeaderLabels(['Description', 'Unit'])
 
         input_descriptions = [
             'EN81-28 emergency call', 
@@ -89,10 +89,14 @@ class ApplicableCodesPage(QWidget):
             item = QTableWidgetItem(description)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             self.codes_table.setItem(row, 0, item)
+            u_item = QTableWidgetItem('—')
+            u_item.setFlags(u_item.flags() & ~Qt.ItemIsEditable)
+            self.codes_table.setItem(row, 1, u_item)
 
         self.codes_table.horizontalHeader().setStretchLastSection(True)
         self.codes_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.codes_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.codes_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         codes_layout.addWidget(self.codes_table)
 
@@ -200,7 +204,7 @@ class ApplicableCodesPage(QWidget):
                 combo.setCurrentIndex(idx)
 
     def populate_from_input(self, compliance_data):
-        for col, compliance_entry in enumerate(compliance_data, start=1):
+        for col, compliance_entry in enumerate(compliance_data, start=2):
             for row in range(self.codes_table.rowCount()):
                 description = self.codes_table.item(row, 0).text()
                 if description not in compliance_entry:
@@ -225,7 +229,7 @@ class ApplicableCodesPage(QWidget):
     def sync_compliance_to_user_inputs(self):
         """Write applicable codes table into ``user_inputs``."""
         compliance_data = []
-        for col in range(1, self.codes_table.columnCount()):
+        for col in range(2, self.codes_table.columnCount()):
             compliance_entry = {}
             for row in range(self.codes_table.rowCount()):
                 description = self.codes_table.item(row, 0).text()

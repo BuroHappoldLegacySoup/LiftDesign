@@ -261,6 +261,9 @@ class MainWindow(QMainWindow):
         if i == 1 and self.page2 is not None:
             self._bind_wizard_pages_to_project_root()
             self.page2.refresh_from_project_data()
+        if i == 7 and self.page8 is not None:
+            self._bind_wizard_pages_to_project_root()
+            self.page8.refresh_from_project_data()
         if i == 8 and self.page_cost is not None:
             self.page_cost._main_window = self
         self.stack.setCurrentIndex(i)
@@ -356,6 +359,7 @@ class MainWindow(QMainWindow):
             self.page8.back_clicked.connect(self.go_back_one_wizard_step)
         else:
             self.page8.user_inputs = data
+            self.page8.refresh_from_project_data()
         if self.stack.indexOf(self.page8) < 0:
             self.stack.addWidget(self.page8)
         self.stack.setCurrentIndex(7)

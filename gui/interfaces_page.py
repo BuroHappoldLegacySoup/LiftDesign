@@ -6,6 +6,8 @@ from PyQt5.QtGui import QDoubleValidator
 from PyQt5.QtCore import pyqtSignal, Qt
 import sys
 
+from .project_lift_schema import LEGACY_EMERGENCY_KEY_TO_CANONICAL
+
 
 class InterfacesPage(QWidget):
     next_clicked = pyqtSignal(dict)
@@ -22,12 +24,38 @@ class InterfacesPage(QWidget):
     _ROW_LINE_EDIT = frozenset({0, 1, 3, 4, 10, 19, 20})
     _ROW_LINE_EDIT_NUMERIC = frozenset({3, 4})
 
-    # Older project keys → current description (first match wins in populate)
+    # Older project keys → current JSON key (first match wins in populate)
     _POPULATE_ALIASES = {
-        'other Security interfaces as per spec. (y/n)': (
+        'other Security interfaces as per spec.': (
             'other Security interfaces as per spec (y/n)',
+            'other Security interfaces as per spec. (y/n)',
         ),
     }
+
+    # (json_key, label, unit)
+    EMERGENCY_ROWS: tuple[tuple[str, str, str], ...] = (
+        ('Smoke management type', 'Smoke management type', 'type'),
+        ('Smoke extraction min. size netto', 'Smoke extraction min. size netto', 'mm²'),
+        ('FAS interfaces as per spec', 'FAS interfaces as per spec', 'y/n'),
+        ('Main evacuation floor fire return and EEL EN81-76', 'Main evacuation floor fire return and EEL EN81-76', 'floor no.'),
+        ('Alternate evacuation floor', 'Alternate evacuation floor', 'floor no.'),
+        ('Emergency power', 'Emergency power', 'y/n'),
+        ('Cascading evacuation control', 'Cascading evacuation control', 'y/n'),
+        ('Type of emergency power', 'Type of emergency power', 'type'),
+        ('FCC panel interface as per spec', 'FCC panel interface as per spec', 'y/n'),
+        ('2-way intercom firefighter lift', '2-way intercom firefighter lift', 'y/n'),
+        ('self-rescue method firefighter lift', 'self-rescue method firefighter lift', 'type'),
+        ('BMS interfaces as per spec', 'BMS interfaces as per spec', 'y/n'),
+        ('lift monitoring', 'lift monitoring', 'y/n'),
+        ('ICT/AV interfaces as per spec', 'ICT/AV interfaces as per spec', 'y/n'),
+        ('In-car CCTV', 'In-car CCTV', '—'),
+        ('Access Control interface as per spec', 'Access Control interface as per spec', 'y/n'),
+        ('other Security interfaces as per spec.', 'other Security interfaces as per spec.', 'y/n'),
+        ('PAVA alarm interface car', 'PAVA alarm interface car', 'y/n'),
+        ('Sprinkler in shaft / Shunt trip', 'Sprinkler in shaft / Shunt trip', 'y/n'),
+        ('Water management Firefighter and Evacuation lift', 'Water management Firefighter and Evacuation lift', 'type'),
+        ('other functions', 'other functions', 'type'),
+    )
 
     def __init__(self, user_inputs):
         super().__init__()
@@ -73,30 +101,23 @@ class InterfacesPage(QWidget):
         interfaces_layout = QVBoxLayout(interfaces_box)
 
         self.interfaces_table = QTableWidget()
-        self.interfaces_table.setColumnCount(1)
-        self.interfaces_table.setHorizontalHeaderLabels(['Description'])
+        self.interfaces_table.setColumnCount(2)
+        self.interfaces_table.setHorizontalHeaderLabels(['Description', 'Unit'])
 
-        self._input_descriptions = [
-            'Smoke management type (type)', 'Smoke extraction min. size netto (mm²)', 'FAS interfaces as per spec (y/n)',
-            'Main evacuation floor fire return and EEL EN81-76 (floor no.)', 'Alternate evacuation floor (floor no.)',
-            'Emergency power (y/n)', 'Cascading evacuation control (y/n)', 'Type of emergency power (type)',
-            'FCC panel interface as per spec (y/n)', '2-way intercom firefighter lift (y/n)',
-            'self-rescue method firefighter lift (type)', 'BMS interfaces as per spec (y/n)', 'lift monitoring (y/n)',
-            'ICT/AV interfaces as per spec (y/n)', 'In-car CCTV', 'Access Control interface as per spec (y/n)',
-            'other Security interfaces as per spec. (y/n)', 'PAVA alarm interface car (y/n)', 'Sprinkler in shaft / Shunt trip (y/n)',
-            'Water management Firefighter and Evacuation lift (type)', 'other functions (type)',
-        ]
+        self.interfaces_table.setRowCount(len(self.EMERGENCY_ROWS))
 
-        self.interfaces_table.setRowCount(len(self._input_descriptions))
-
-        for row, description in enumerate(self._input_descriptions):
-            item = QTableWidgetItem(description)
+        for row, (_jk, label, unit) in enumerate(self.EMERGENCY_ROWS):
+            item = QTableWidgetItem(label)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             self.interfaces_table.setItem(row, 0, item)
+            u_item = QTableWidgetItem(unit if unit else '—')
+            u_item.setFlags(u_item.flags() & ~Qt.ItemIsEditable)
+            self.interfaces_table.setItem(row, 1, u_item)
 
         self.interfaces_table.horizontalHeader().setStretchLastSection(True)
         self.interfaces_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.interfaces_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.interfaces_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         interfaces_layout.addWidget(self.interfaces_table)
 
@@ -142,14 +163,17 @@ class InterfacesPage(QWidget):
             return cell_widget
         return None
 
-    def _value_for_description(self, emergency_entry: dict, description: str):
-        if description in emergency_entry:
-            return emergency_entry[description]
+    def _value_for_description(self, emergency_entry: dict, json_key: str):
+        if json_key in emergency_entry:
+            return emergency_entry[json_key]
         for canon, aliases in self._POPULATE_ALIASES.items():
-            if description == canon:
+            if json_key == canon:
                 for a in aliases:
                     if a in emergency_entry:
                         return emergency_entry[a]
+        for old_k, new_k in LEGACY_EMERGENCY_KEY_TO_CANONICAL.items():
+            if new_k == json_key and old_k in emergency_entry:
+                return emergency_entry[old_k]
         return None
 
     @staticmethod
@@ -191,10 +215,10 @@ class InterfacesPage(QWidget):
                 combo.setCurrentIndex(i)
 
     def populate_from_input(self, emergency_data):
-        for col, emergency_entry in enumerate(emergency_data, start=1):
+        for col, emergency_entry in enumerate(emergency_data, start=2):
             for row in range(self.interfaces_table.rowCount()):
-                description = self.interfaces_table.item(row, 0).text()
-                value = self._value_for_description(emergency_entry, description)
+                jk = self.EMERGENCY_ROWS[row][0]
+                value = self._value_for_description(emergency_entry, jk)
                 if value is None:
                     continue
                 cell_widget = self.interfaces_table.cellWidget(row, col)
@@ -213,10 +237,10 @@ class InterfacesPage(QWidget):
     def sync_emergency_to_user_inputs(self):
         """Write technical interfaces table into ``user_inputs``."""
         emergency_data = []
-        for col in range(1, self.interfaces_table.columnCount()):
+        for col in range(2, self.interfaces_table.columnCount()):
             emergency_entry = {}
             for row in range(self.interfaces_table.rowCount()):
-                description = self.interfaces_table.item(row, 0).text()
+                jk = self.EMERGENCY_ROWS[row][0]
                 cell_widget = self.interfaces_table.cellWidget(row, col)
 
                 if row in self._ROW_COMBO_YES_NO or row in self._ROW_COMBO_POWER_TYPE:
@@ -227,7 +251,7 @@ class InterfacesPage(QWidget):
                 else:
                     value = ''
 
-                emergency_entry[description] = value
+                emergency_entry[jk] = value
 
             emergency_data.append(emergency_entry)
 

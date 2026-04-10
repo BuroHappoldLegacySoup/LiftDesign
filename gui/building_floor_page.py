@@ -1,6 +1,7 @@
 import copy
 
 from .project_lift_schema import (
+    KEY_FLOORS,
     KEY_GENERAL_SPECIFICATION,
     ensure_lift_section_slots,
     merged_lift_at,
@@ -20,8 +21,8 @@ import sys
 FLOOR_TABLE_HEADERS = ['Lift', 'Floor', 'Floor Name', 'Height (m)', 'Entrances']
 
 # General specification keys — table row count follows *Number of floors*; *Stops* is fallback for older JSON.
-LS_KEY_NUM_FLOORS = 'Number of floors (Stck.)'
-LS_KEY_STOPS = 'Stops (Stck.)'
+LS_KEY_NUM_FLOORS = 'Number of floors'
+LS_KEY_STOPS = 'Stops'
 
 class EntranceTypeWidget(QFrame):
     def __init__(self, parent=None):
@@ -65,8 +66,10 @@ class EntranceTypeWidget(QFrame):
             self.none_cb.blockSignals(False)
 
     def get_selected_entrances(self):
+        """Return JSON-serializable entrance list (``[\"None\"]`` when None is selected)."""
         if self.none_cb.isChecked():
-            return []
+            # Explicit marker so copy/load/save can distinguish from “unset” (empty list, all off).
+            return ["None"]
         entrances = []
         if self.front_cb.isChecked():
             entrances.append("Front")
@@ -79,14 +82,27 @@ class EntranceTypeWidget(QFrame):
     def set_selected_entrances(self, entrances):
         if not isinstance(entrances, list):
             entrances = [entrances]  # Convert string to list for backward compatibility
-        # Treat empty, explicit "None", or list containing only None as None
         norm = [str(e).strip() for e in entrances if e is not None and str(e).strip()]
-        is_none = not norm or (len(norm) == 1 and norm[0].lower() == "none")
-        if is_none:
+        if not norm:
+            # Legacy / unset: no direction and not “None”.
             self.none_cb.setChecked(False)
             self.front_cb.setChecked(False)
             self.rear_cb.setChecked(False)
             self.side_cb.setChecked(False)
+            return
+        if len(norm) == 1 and norm[0].lower() == "none":
+            self.none_cb.blockSignals(True)
+            self.front_cb.blockSignals(True)
+            self.rear_cb.blockSignals(True)
+            self.side_cb.blockSignals(True)
+            self.none_cb.setChecked(True)
+            self.front_cb.setChecked(False)
+            self.rear_cb.setChecked(False)
+            self.side_cb.setChecked(False)
+            self.none_cb.blockSignals(False)
+            self.front_cb.blockSignals(False)
+            self.rear_cb.blockSignals(False)
+            self.side_cb.blockSignals(False)
             return
         self.none_cb.setChecked(False)
         self.front_cb.setChecked("Front" in entrances)
@@ -98,12 +114,36 @@ class BuildingFloorPage(QWidget):
     back_clicked = pyqtSignal()
 
     @staticmethod
+    def _lift_floor_key(lift_idx: int) -> str:
+        return f"Lift {lift_idx + 1}"
+
+    @staticmethod
+    def _floor_rows_from_saved_lift_dict(lift_idx: int, lift_data: object) -> list:
+        """Floor dict list for ``lift_idx`` — always use canonical key ``Lift N`` (not ``keys()[0]``)."""
+        key = BuildingFloorPage._lift_floor_key(lift_idx)
+        if not isinstance(lift_data, dict):
+            return []
+        if key in lift_data:
+            v = lift_data[key]
+            return list(v) if isinstance(v, list) else []
+        # Legacy single-lift files sometimes used only ``Lift 1`` as the inner key.
+        if lift_idx == 0 and len(lift_data) == 1:
+            v = next(iter(lift_data.values()))
+            return list(v) if isinstance(v, list) else []
+        return []
+
+    @staticmethod
     def _floor_row_count_from_lift_system(lift_system: dict) -> int:
         """
-        Rows per lift = General specification **Number of floors (Stck.)** when set;
-        otherwise **Stops (Stck.)** for legacy projects. Minimum 1.
+        Rows per lift = General specification **Number of floors** when set;
+        otherwise **Stops** for legacy projects. Minimum 1.
         """
-        for key in (LS_KEY_NUM_FLOORS, LS_KEY_STOPS):
+        for key in (
+            LS_KEY_NUM_FLOORS,
+            LS_KEY_STOPS,
+            'Number of floors (Stck.)',
+            'Stops (Stck.)',
+        ):
             raw = lift_system.get(key, '')
             if raw is None or not str(raw).strip():
                 continue
@@ -124,8 +164,8 @@ class BuildingFloorPage(QWidget):
         self.initUI()
         
         # Populate data if Floors exists in user_inputs
-        if 'Floors' in self.user_inputs:
-            self.populate_from_input(self.user_inputs['Floors'])
+        if KEY_FLOORS in self.user_inputs:
+            self.populate_from_input(self.user_inputs[KEY_FLOORS])
 
     def initUI(self):
         self.setMinimumWidth(1200)
@@ -234,8 +274,19 @@ class BuildingFloorPage(QWidget):
         self.floor_table.setRowCount(self.total_rows)
         self.floor_table.setHorizontalHeaderLabels(FLOOR_TABLE_HEADERS)
         self.initialize_table()
-        if 'Floors' in self.user_inputs:
-            self.populate_from_input(self.user_inputs['Floors'])
+        if KEY_FLOORS in self.user_inputs:
+            self.populate_from_input(self.user_inputs[KEY_FLOORS])
+
+    def refresh_from_project_data(self) -> None:
+        """Re-read ``user_inputs['Floors']`` after JSON load or when revisiting this tab (same as page 2)."""
+        normalize_project_lift_data(self.user_inputs)
+        self.lifts_data = []
+        self.process_lift_data()
+        if self.floor_table.rowCount() != self.total_rows:
+            self._rebuild_floor_table_from_stored_inputs()
+        elif KEY_FLOORS in self.user_inputs:
+            self.populate_from_input(self.user_inputs[KEY_FLOORS])
+        self._populate_copy_lift_combos()
 
     def _populate_one_lift_from_floor_list(self, lift_idx: int, floors: list) -> None:
         """Apply floor dicts to one lift’s rows (same top-to-bottom mapping as populate_from_input)."""
@@ -267,9 +318,7 @@ class BuildingFloorPage(QWidget):
             if lift_idx >= len(self.lifts_data):
                 break
             nf = self.lifts_data[lift_idx]['num_floors']
-            # Each lift_data is a dictionary with one key like 'Lift 1'
-            lift_number = list(lift_data.keys())[0]  # Get 'Lift 1'
-            floors = lift_data[lift_number]  # List in ascending order: floor 0, 1, …
+            floors = self._floor_rows_from_saved_lift_dict(lift_idx, lift_data)
 
             for floor_idx, floor_data in enumerate(floors):
                 # Table rows: top = highest floor index; saved list is ascending 0 … n−1
@@ -347,31 +396,64 @@ class BuildingFloorPage(QWidget):
                 floor_num = floor_item.text() if floor_item is not None else str(idx)
                 name_w = self.floor_table.cellWidget(row, 2)
                 height_w = self.floor_table.cellWidget(row, 3)
+                if isinstance(type_widget, EntranceTypeWidget):
+                    entrances = type_widget.get_selected_entrances()
+                else:
+                    entrances = []
                 floor_data = {
                     'Floor': floor_num,
                     'Floor Name': name_w.text() if isinstance(name_w, QLineEdit) else '',
                     'Height (m)': height_w.text() if isinstance(height_w, QLineEdit) else '',
-                    'Entrances': type_widget.get_selected_entrances() if type_widget is not None else [],
+                    'Entrances': entrances,
                 }
                 lift_floors.append(floor_data)
 
             floors_data.append({
-                f'Lift {lift["lift_number"]}': lift_floors
+                self._lift_floor_key(lift["lift_number"] - 1): lift_floors
             })
             current_row += nf
         return floors_data
 
+    def _merge_floors_built_with_prior(self, built: list, prior: list, lifts_data_list: list) -> list:
+        """If the table yielded no rows for a lift that should have ``nf`` floors, keep prior JSON for that lift."""
+        if not prior:
+            return built
+        out = list(built)
+        n = len(lifts_data_list)
+        for i in range(n):
+            nf = lifts_data_list[i]["num_floors"]
+            key = self._lift_floor_key(i)
+            new_list: list = []
+            if i < len(out) and isinstance(out[i], dict):
+                new_list = out[i].get(key)
+                if not isinstance(new_list, list):
+                    new_list = []
+            if len(new_list) == 0 and nf > 0 and i < len(prior):
+                old = prior[i]
+                if isinstance(old, dict) and key in old:
+                    old_list = old[key]
+                    if isinstance(old_list, list) and len(old_list) > 0:
+                        while len(out) <= i:
+                            out.append({self._lift_floor_key(len(out)): []})
+                        out[i] = {key: copy.deepcopy(old_list)}
+        return out
+
     def sync_floors_to_user_inputs(self):
         """Write the floor table into ``user_inputs['Floors']`` (used when leaving this tab and before JSON save)."""
+        normalize_project_lift_data(self.user_inputs)
+        prior_floors = copy.deepcopy(self.user_inputs.get(KEY_FLOORS) or [])
         old_lifts = copy.deepcopy(self.lifts_data)
         self.process_lift_data()
         if self.floor_table.rowCount() != self.total_rows:
             # Persist widgets using the previous row layout so edits are not lost, then realign the grid.
             if old_lifts:
-                self.user_inputs['Floors'] = self._floors_dict_from_table_rows(old_lifts)
+                self.user_inputs[KEY_FLOORS] = self._floors_dict_from_table_rows(old_lifts)
             self._rebuild_floor_table_from_stored_inputs()
 
-        self.user_inputs['Floors'] = self._floors_dict_from_table_rows(self.lifts_data)
+        built = self._floors_dict_from_table_rows(self.lifts_data)
+        self.user_inputs[KEY_FLOORS] = self._merge_floors_built_with_prior(
+            built, prior_floors, self.lifts_data
+        )
 
     def collect_data_and_go_next(self):
         self.sync_floors_to_user_inputs()
@@ -405,18 +487,19 @@ class BuildingFloorPage(QWidget):
                     floor_num = floor_item.text() if floor_item is not None else str(idx)
                     name_w = self.floor_table.cellWidget(row, 2)
                     height_w = self.floor_table.cellWidget(row, 3)
+                    entrances = tw.get_selected_entrances() if isinstance(tw, EntranceTypeWidget) else []
                     lift_floors.append({
                         "Floor": floor_num,
                         "Floor Name": name_w.text() if isinstance(name_w, QLineEdit) else "",
                         "Height (m)": height_w.text() if isinstance(height_w, QLineEdit) else "",
-                        "Entrances": tw.get_selected_entrances() if tw is not None else [],
+                        "Entrances": entrances,
                     })
                 return lift_floors
             current_row += lift["num_floors"]
         return []
 
     def _ensure_floors_list_length(self, min_len: int) -> None:
-        floors = self.user_inputs.setdefault("Floors", [])
+        floors = self.user_inputs.setdefault(KEY_FLOORS, [])
         while len(floors) < min_len:
             floors.append({f"Lift {len(floors) + 1}": []})
 
@@ -435,12 +518,12 @@ class BuildingFloorPage(QWidget):
         self._copy_floor_rows_between_lifts(from_no - 1, to_no - 1)
 
     def _copy_floor_rows_between_lifts(self, from_idx: int, to_idx: int) -> None:
-        """Copy table floor data from one lift to another and mirror **Number of floors (Stck.)** in GeneralSpecification."""
+        """Copy table floor data from one lift to another and mirror **Number of floors** in GeneralSpecification."""
         # Persist every lift's current table into ``Floors`` first so the source lift is not lost
         # when updating the destination in ``user_inputs``.
         self.sync_floors_to_user_inputs()
 
-        floors_list = self.user_inputs.get("Floors") or []
+        floors_list = self.user_inputs.get(KEY_FLOORS) or []
         if from_idx >= len(floors_list):
             QMessageBox.warning(
                 self,
@@ -480,7 +563,7 @@ class BuildingFloorPage(QWidget):
             dst_sys[LS_KEY_NUM_FLOORS] = str(len(source_floors))
 
         self._ensure_floors_list_length(to_idx + 1)
-        self.user_inputs["Floors"][to_idx] = {
+        self.user_inputs[KEY_FLOORS][to_idx] = {
             f"Lift {to_idx + 1}": copy.deepcopy(source_floors),
         }
 
@@ -507,8 +590,8 @@ if __name__ == '__main__':
     sample_input = {
     'BuildingSystems': [{'Number': '1'}, {'Number': '2'}],
     'GeneralSpecification': [
-        {'Number of floors (Stck.)': '3', 'Stops (Stck.)': '5'},
-        {'Number of floors (Stck.)': '2', 'Stops (Stck.)': '4'},
+        {'Number of floors': '3', 'Stops': '5'},
+        {'Number of floors': '2', 'Stops': '4'},
     ],
     'LayoutInformation': [{}, {}],
     'Floors': [

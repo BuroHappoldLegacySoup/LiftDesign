@@ -47,24 +47,26 @@ class ForceSpecPage(QWidget):
     next_clicked = pyqtSignal(dict)
     back_clicked = pyqtSignal()
 
-    DESCRIPTIONS = [
-        "Rail weight car (kg/m)",
-        "Force F1, F2 elevator rail segment (kN)",
-        "Number of car buffers (St.)",
-        "Force F3, each buffer (kN)",
-        "Counterweight safety gear",
-        "Number of cwt buffers (St.)",
-        "Rail weight cwt (kg/m)",
-        "Force F4, per counterweight rail segment (kN)",
-        "Force F5, per counterweight buffer (kN)",
-        "Force F6, static shaft door (kN)",
-        "Force F7, static counterweight (kN)",
-        "Force F8, static cabin (kN)",
-        "Force Fx, cabin rail (kN)",
-        "Force Fy, cabin rail (kN)",
-        "Force Fx, counterweight rail (kN)",
-        "Force Fy, counterweight rail (kN)",
-    ]
+    FORCES_ROWS: tuple[tuple[str, str, str], ...] = (
+        ("Rail weight car", "Rail weight car", "kg/m"),
+        ("Force F1, F2 elevator rail segment", "Force F1, F2 elevator rail segment", "kN"),
+        ("Number of car buffers", "Number of car buffers", "St."),
+        ("Force F3, each buffer", "Force F3, each buffer", "kN"),
+        ("Counterweight safety gear", "Counterweight safety gear", "—"),
+        ("Number of cwt buffers", "Number of cwt buffers", "St."),
+        ("Rail weight cwt", "Rail weight cwt", "kg/m"),
+        ("Force F4, per counterweight rail segment", "Force F4, per counterweight rail segment", "kN"),
+        ("Force F5, per counterweight buffer", "Force F5, per counterweight buffer", "kN"),
+        ("Force F6, static shaft door", "Force F6, static shaft door", "kN"),
+        ("Force F7, static counterweight", "Force F7, static counterweight", "kN"),
+        ("Force F8, static cabin", "Force F8, static cabin", "kN"),
+        ("Force Fx, cabin rail", "Force Fx, cabin rail", "kN"),
+        ("Force Fy, cabin rail", "Force Fy, cabin rail", "kN"),
+        ("Force Fx, counterweight rail", "Force Fx, counterweight rail", "kN"),
+        ("Force Fy, counterweight rail", "Force Fy, counterweight rail", "kN"),
+    )
+
+    DESCRIPTIONS = tuple(r[0] for r in FORCES_ROWS)
 
     ROW_RAIL_CAR = 0
     ROW_CAR_BUFFERS = 2
@@ -76,16 +78,16 @@ class ForceSpecPage(QWidget):
         {1, 3, 7, 8, 9, 10, 11, 12, 13, 14, 15}
     )
 
-    LOAD_KEY = "Load capacity (kg)"
-    TRAVEL_KEY = "Travel height (m)"
-    CABIN_W_KEY = "Cabin width (mm)"
-    CABIN_D_KEY = "Cabin depth (mm)"
+    LOAD_KEY = "Load capacity"
+    TRAVEL_KEY = "Travel height"
+    CABIN_W_KEY = "Cabin width"
+    CABIN_D_KEY = "Cabin depth"
     CABIN_SHAPE_KEY = "Cabin type/shape"
-    ACCESSIBLE_YN_KEY = "Accesible rooms/cwt safety (y/n)"
+    ACCESSIBLE_YN_KEY = "Accessible rooms/cwt safety"
 
     # Legacy saved keys → current description label
     _POPULATE_ALIASES = {
-        "Number of cwt buffers (St.)": ("number of cwt buffers (kg/m)",),
+        "Number of cwt buffers": ("number of cwt buffers (kg/m)", "Number of cwt buffers (St.)"),
     }
 
     def __init__(self, user_inputs):
@@ -100,11 +102,11 @@ class ForceSpecPage(QWidget):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        for col in range(1, self.force_table.columnCount()):
+        for col in range(2, self.force_table.columnCount()):
             self._sync_derived_fields(col)
 
     def _lift_at_column(self, col: int) -> dict:
-        i = col - 1
+        i = col - 2
         return merged_lift_at(self.user_inputs, i)
 
     def _resolved_cabin_width_depth_mm(self, lift: dict):
@@ -142,6 +144,7 @@ class ForceSpecPage(QWidget):
         return None
 
     def _sync_derived_fields(self, col: int) -> None:
+        idx = col - 2
         lift = self._lift_at_column(col)
 
         w_car = self.force_table.cellWidget(self.ROW_CAR_BUFFERS, col)
@@ -169,20 +172,27 @@ class ForceSpecPage(QWidget):
         for row in range(self.force_table.rowCount()):
             if row not in self.ROWS_COMPUTED_LINEEDIT:
                 continue
-            desc = self.force_table.item(row, 0).text()
+            jk = self.DESCRIPTIONS[row]
             w = self.force_table.cellWidget(row, col)
             if not isinstance(w, QLineEdit):
                 continue
-            if desc in derived:
-                w.setText(derived[desc])
+            if jk in derived:
+                w.setText(derived[jk])
             else:
-                w.setText("")
+                forces = self.user_inputs.get("Forces") or []
+                stored = None
+                if 0 <= idx < len(forces) and isinstance(forces[idx], dict):
+                    stored = forces[idx].get(jk)
+                if stored is not None and str(stored).strip() != "":
+                    w.setText(str(stored))
+                else:
+                    w.setText("")
 
     def populate_from_input(self, forces_data):
-        for col, force_data in enumerate(forces_data, start=1):
+        for col, force_data in enumerate(forces_data, start=2):
             for row in range(self.force_table.rowCount()):
-                description = self.force_table.item(row, 0).text()
-                value = self._cell_value_for_description(force_data, description)
+                jk = self.DESCRIPTIONS[row]
+                value = self._cell_value_for_description(force_data, jk)
                 if value is None:
                     continue
                 cell_widget = self.force_table.cellWidget(row, col)
@@ -224,18 +234,22 @@ class ForceSpecPage(QWidget):
         force_layout = QVBoxLayout(force_box)
 
         self.force_table = QTableWidget()
-        self.force_table.setColumnCount(1)
-        self.force_table.setHorizontalHeaderLabels(["Description"])
-        self.force_table.setRowCount(len(self.DESCRIPTIONS))
+        self.force_table.setColumnCount(2)
+        self.force_table.setHorizontalHeaderLabels(["Description", "Unit"])
+        self.force_table.setRowCount(len(self.FORCES_ROWS))
 
-        for row, description in enumerate(self.DESCRIPTIONS):
-            item = QTableWidgetItem(description)
+        for row, (_jk, label, unit) in enumerate(self.FORCES_ROWS):
+            item = QTableWidgetItem(label)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             self.force_table.setItem(row, 0, item)
+            u_item = QTableWidgetItem(unit if unit else "—")
+            u_item.setFlags(u_item.flags() & ~Qt.ItemIsEditable)
+            self.force_table.setItem(row, 1, u_item)
 
         self.force_table.horizontalHeader().setStretchLastSection(True)
         self.force_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.force_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.force_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         force_layout.addWidget(self.force_table)
 
@@ -322,24 +336,42 @@ class ForceSpecPage(QWidget):
 
     def sync_forces_to_user_inputs(self):
         """Write mechanical loading table into ``user_inputs``."""
+        existing = self.user_inputs.get("Forces") or []
         forces_data = []
-        for col in range(1, self.force_table.columnCount()):
-            force_data = {}
+        for col in range(2, self.force_table.columnCount()):
+            idx = col - 2
+            merged = dict(existing[idx]) if idx < len(existing) and isinstance(existing[idx], dict) else {}
             for row in range(self.force_table.rowCount()):
-                description = self.force_table.item(row, 0).text()
+                jk = self.DESCRIPTIONS[row]
                 cell_widget = self.force_table.cellWidget(row, col)
 
                 if isinstance(cell_widget, QLineEdit):
                     value = cell_widget.text()
+                    v = value.strip()
+                    if row in self.ROWS_COMPUTED_LINEEDIT:
+                        if v != "":
+                            merged[jk] = value
+                        else:
+                            prev = self._cell_value_for_description(merged, jk)
+                            if prev is not None and str(prev).strip() != "":
+                                merged[jk] = prev
+                            else:
+                                merged[jk] = ""
+                    elif v != "" or cell_widget.isModified():
+                        merged[jk] = value
+                    else:
+                        prev = self._cell_value_for_description(merged, jk)
+                        merged[jk] = (
+                            prev if prev is not None and str(prev).strip() != "" else ""
+                        )
                 elif isinstance(cell_widget, QComboBox):
-                    value = cell_widget.currentText()
+                    merged[jk] = cell_widget.currentText()
                 elif isinstance(cell_widget, QCheckBox):
-                    value = cell_widget.isChecked()
+                    merged[jk] = cell_widget.isChecked()
                 else:
-                    value = ""
+                    merged[jk] = ""
 
-                force_data[description] = value
-            forces_data.append(force_data)
+            forces_data.append(merged)
 
         self.user_inputs["Forces"] = forces_data
 
@@ -354,13 +386,13 @@ if __name__ == "__main__":
         "BuildingSystems": [{"Number": "1", "System Name": "Lift A"}],
         "GeneralSpecification": [
             {
-                "Load capacity (kg)": "630",
-                "Travel height (m)": "20",
-                "Accesible rooms/cwt safety (y/n)": "no",
+                "Load capacity": "630",
+                "Travel height": "20",
+                "Accessible rooms/cwt safety": "no",
             }
         ],
         "LayoutInformation": [
-            {"Cabin width (mm)": "1100", "Cabin depth (mm)": "1400"},
+            {"Cabin width": "1100", "Cabin depth": "1400"},
         ],
         "Forces": [],
     }

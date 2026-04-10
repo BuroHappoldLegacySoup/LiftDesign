@@ -30,23 +30,37 @@ class LiftDriveControlPage(QWidget):
 
     next_clicked = pyqtSignal(dict)
 
-    DESCRIPTIONS = [
-        "Drive/Motor location",
-        "Control / Operation panel location",
-        "Number of trips per hour (1/h)",
-        "Drive/Motor type",
-        "Power grid voltage/type (V)",
-        "Duty cycle (motor) (%)",
-        "Drive/Motor Power (kW)",
-        "Connected load (kVA)",
-        "Rated current (A)",
-        "Starting current (factor ≈ 2) (A)",
-        "Energy recovery (y/n)",
-        "Diversity factor (-)",
-        "Energy consumption (kWh)",
-        "Heat dissipation motor (kJ)",
-        "Temperature machine room / shaft (°C)",
-    ]
+    # (json_key, label, unit). JSON stores ``json_key`` only.
+    LIFT_DRIVE_ROWS: tuple[tuple[str, str, str], ...] = (
+        ("Drive/Motor location", "Drive/Motor location", "—"),
+        ("Control / Operation panel location", "Control / Operation panel location", "—"),
+        ("Number of trips per hour", "Number of trips per hour", "1/h"),
+        ("Drive/Motor type", "Drive/Motor type", "—"),
+        ("Power grid voltage/type", "Power grid voltage/type", "V"),
+        ("Duty cycle (motor)", "Duty cycle (motor)", "%"),
+        ("Drive/Motor Power", "Drive/Motor Power", "kW"),
+        ("Connected load", "Connected load", "kVA"),
+        ("Rated current", "Rated current", "A"),
+        ("Starting current (factor ≈ 2)", "Starting current (factor ≈ 2)", "A"),
+        ("Energy recovery", "Energy recovery", "y/n"),
+        ("Diversity factor", "Diversity factor", "—"),
+        ("Energy consumption", "Energy consumption", "kWh"),
+        ("Heat dissipation motor", "Heat dissipation motor", "kJ"),
+        ("Temperature machine room / shaft", "Temperature machine room / shaft", "°C"),
+    )
+
+    DESCRIPTIONS = tuple(r[0] for r in LIFT_DRIVE_ROWS)
+
+    _COMPUTED_VALUE_KEYS = frozenset(
+        {
+            "Drive/Motor Power",
+            "Connected load",
+            "Rated current",
+            "Starting current (factor ≈ 2)",
+            "Energy consumption",
+            "Heat dissipation motor",
+        }
+    )
 
     ROW_DRIVE_MOTOR_LOCATION = 0
     ROW_DUTY_CYCLE = 5
@@ -54,12 +68,12 @@ class LiftDriveControlPage(QWidget):
     ROW_ENERGY_RECOVERY = 10
     ROW_NUMERIC = frozenset({5, 6, 7, 8, 9, 11, 12, 13})
 
-    LOAD_CAPACITY_KEY = "Load capacity (kg)"
-    PERSONS_KEY = "Permissible number of persons (Pers.)"
+    LOAD_CAPACITY_KEY = "Load capacity"
+    PERSONS_KEY = "Permissible number of persons"
 
     # Older project files may use these labels
     _POPULATE_ALIASES = {
-        "Power grid voltage/type (V)": ("Power network", "Power grid voltage/type"),
+        "Power grid voltage/type": ("Power network", "Power grid voltage/type (V)"),
     }
 
     def __init__(self, user_inputs):
@@ -74,7 +88,7 @@ class LiftDriveControlPage(QWidget):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        for col in range(1, self.system_table.columnCount()):
+        for col in range(2, self.system_table.columnCount()):
             self._apply_computed_for_column(col)
 
     def _cell_value_for_description(self, system_data: dict, description: str):
@@ -128,18 +142,22 @@ class LiftDriveControlPage(QWidget):
         system_layout = QVBoxLayout(system_box)
 
         self.system_table = QTableWidget()
-        self.system_table.setColumnCount(1)
-        self.system_table.setHorizontalHeaderLabels(["Description"])
-        self.system_table.setRowCount(len(self.DESCRIPTIONS))
+        self.system_table.setColumnCount(2)
+        self.system_table.setHorizontalHeaderLabels(["Description", "Unit"])
+        self.system_table.setRowCount(len(self.LIFT_DRIVE_ROWS))
 
-        for row, description in enumerate(self.DESCRIPTIONS):
-            item = QTableWidgetItem(description)
+        for row, (_jk, label, unit) in enumerate(self.LIFT_DRIVE_ROWS):
+            item = QTableWidgetItem(label)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             self.system_table.setItem(row, 0, item)
+            u_item = QTableWidgetItem(unit if unit else "—")
+            u_item.setFlags(u_item.flags() & ~Qt.ItemIsEditable)
+            self.system_table.setItem(row, 1, u_item)
 
         self.system_table.horizontalHeader().setStretchLastSection(True)
         self.system_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.system_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.system_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         system_layout.addWidget(self.system_table)
 
@@ -158,10 +176,10 @@ class LiftDriveControlPage(QWidget):
         self.initialize_lift_columns()
 
     def populate_from_input(self, drive_data):
-        for col, system_data in enumerate(drive_data, start=1):
+        for col, system_data in enumerate(drive_data, start=2):
             for row in range(self.system_table.rowCount()):
-                description = self.system_table.item(row, 0).text()
-                value = self._cell_value_for_description(system_data, description)
+                jk = self.DESCRIPTIONS[row]
+                value = self._cell_value_for_description(system_data, jk)
                 if value is None:
                     continue
                 cell_widget = self.system_table.cellWidget(row, col)
@@ -182,10 +200,10 @@ class LiftDriveControlPage(QWidget):
 
     def _apply_defaults_for_column(self, col, overwrite_empty_only=False):
         for row in range(self.system_table.rowCount()):
-            description = self.system_table.item(row, 0).text()
+            jk = self.DESCRIPTIONS[row]
             w = self.system_table.cellWidget(row, col)
-            if description in ELECTRICAL_HVAC_DEFAULTS:
-                dflt = ELECTRICAL_HVAC_DEFAULTS[description]
+            if jk in ELECTRICAL_HVAC_DEFAULTS:
+                dflt = ELECTRICAL_HVAC_DEFAULTS[jk]
                 if isinstance(w, QLineEdit):
                     if not overwrite_empty_only or not w.text().strip():
                         w.setText(dflt)
@@ -231,7 +249,7 @@ class LiftDriveControlPage(QWidget):
         self._apply_computed_for_column(col_position)
 
     def _apply_computed_for_column(self, col):
-        idx = col - 1
+        idx = col - 2
         lift = merged_lift_at(self.user_inputs, idx)
         if not lift:
             return
@@ -242,14 +260,8 @@ class LiftDriveControlPage(QWidget):
 
         derived = electrical_hvac_derived_for_lift(load, persons, duty_txt)
         key_to_row = {d: i for i, d in enumerate(self.DESCRIPTIONS)}
-        computed_keys = (
-            "Drive/Motor Power (kW)",
-            "Connected load (kVA)",
-            "Rated current (A)",
-            "Starting current (factor ≈ 2) (A)",
-            "Energy consumption (kWh)",
-            "Heat dissipation motor (kJ)",
-        )
+        computed_keys = tuple(sorted(self._COMPUTED_VALUE_KEYS))
+        lift_drive = self.user_inputs.get("LiftDrive") or []
         for key in computed_keys:
             r = key_to_row.get(key)
             if r is None:
@@ -260,26 +272,50 @@ class LiftDriveControlPage(QWidget):
             if key in derived:
                 w.setText(derived[key])
             else:
-                w.setText("")
+                stored = None
+                if 0 <= idx < len(lift_drive) and isinstance(lift_drive[idx], dict):
+                    stored = self._cell_value_for_description(lift_drive[idx], key)
+                if stored is not None and str(stored).strip() != "":
+                    w.setText(str(stored))
+                else:
+                    w.setText("")
 
     def sync_lift_drive_to_user_inputs(self):
         """Write Electrical & HVAC table into ``user_inputs``."""
+        existing = self.user_inputs.get("LiftDrive") or []
         systems_data = []
-        for col in range(1, self.system_table.columnCount()):
-            system_data = {}
+        for col in range(2, self.system_table.columnCount()):
+            idx = col - 2
+            merged = dict(existing[idx]) if idx < len(existing) and isinstance(existing[idx], dict) else {}
             for row in range(self.system_table.rowCount()):
-                description = self.system_table.item(row, 0).text()
+                jk = self.DESCRIPTIONS[row]
                 cell_widget = self.system_table.cellWidget(row, col)
                 if isinstance(cell_widget, QLineEdit):
                     value = cell_widget.text()
+                    v = value.strip()
+                    if jk in self._COMPUTED_VALUE_KEYS:
+                        if v != "":
+                            merged[jk] = value
+                        else:
+                            prev = self._cell_value_for_description(merged, jk)
+                            if prev is not None and str(prev).strip() != "":
+                                merged[jk] = prev
+                            else:
+                                merged[jk] = ""
+                    elif v != "" or cell_widget.isModified():
+                        merged[jk] = value
+                    else:
+                        prev = self._cell_value_for_description(merged, jk)
+                        merged[jk] = (
+                            prev if prev is not None and str(prev).strip() != "" else ""
+                        )
                 elif isinstance(cell_widget, QComboBox):
-                    value = cell_widget.currentText()
+                    merged[jk] = cell_widget.currentText()
                 elif isinstance(cell_widget, QCheckBox):
-                    value = "yes" if cell_widget.isChecked() else "no"
+                    merged[jk] = "yes" if cell_widget.isChecked() else "no"
                 else:
-                    value = ""
-                system_data[description] = value
-            systems_data.append(system_data)
+                    merged[jk] = ""
+            systems_data.append(merged)
 
         self.user_inputs["LiftDrive"] = systems_data
 
@@ -294,8 +330,8 @@ if __name__ == "__main__":
         "BuildingSystems": [{"Number": "1"}],
         "GeneralSpecification": [
             {
-                "Load capacity (kg)": "630",
-                "Permissible number of persons (Pers.)": "17",
+                "Load capacity": "630",
+                "Permissible number of persons": "17",
             }
         ],
         "LayoutInformation": [{}],

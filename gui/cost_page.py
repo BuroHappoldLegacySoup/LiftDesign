@@ -70,18 +70,22 @@ class CostPage(QWidget):
         cost_layout = QVBoxLayout(cost_box)
 
         self.cost_table = QTableWidget()
-        self.cost_table.setColumnCount(1)
-        self.cost_table.setHorizontalHeaderLabels(['Description'])
+        self.cost_table.setColumnCount(2)
+        self.cost_table.setHorizontalHeaderLabels(['Description', 'Unit'])
         self.cost_table.setRowCount(len(self.DESCRIPTIONS))
 
         for row, description in enumerate(self.DESCRIPTIONS):
             item = QTableWidgetItem(description)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             self.cost_table.setItem(row, 0, item)
+            u_item = QTableWidgetItem('—')
+            u_item.setFlags(u_item.flags() & ~Qt.ItemIsEditable)
+            self.cost_table.setItem(row, 1, u_item)
 
         self.cost_table.horizontalHeader().setStretchLastSection(True)
         self.cost_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.cost_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.cost_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         cost_layout.addWidget(self.cost_table)
 
@@ -125,7 +129,7 @@ class CostPage(QWidget):
     def sync_cost_to_user_inputs(self):
         """Write the cost table into ``user_inputs['Cost']`` (used when leaving this tab and before JSON save)."""
         cost_data = []
-        for col in range(1, self.cost_table.columnCount()):
+        for col in range(2, self.cost_table.columnCount()):
             entry = {}
             for row, description in enumerate(self.DESCRIPTIONS):
                 w = self.cost_table.cellWidget(row, col)
@@ -137,7 +141,7 @@ class CostPage(QWidget):
         """Update shared project dict and refresh cells when revisiting this page."""
         self.user_inputs = user_inputs
         self.number_of_lifts = len(user_inputs.get('BuildingSystems') or [])
-        while self.cost_table.columnCount() > 1:
+        while self.cost_table.columnCount() > 2:
             self.cost_table.removeColumn(self.cost_table.columnCount() - 1)
         self.initialize_lift_columns()
         if 'Cost' in self.user_inputs:
@@ -157,7 +161,7 @@ class CostPage(QWidget):
             self.cost_table.setCellWidget(row, col_position, w)
 
     def populate_from_input(self, cost_data):
-        for col, entry in enumerate(cost_data, start=1):
+        for col, entry in enumerate(cost_data, start=2):
             if col >= self.cost_table.columnCount():
                 break
             for row, description in enumerate(self.DESCRIPTIONS):

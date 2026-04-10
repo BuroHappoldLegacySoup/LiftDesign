@@ -38,7 +38,7 @@ class LayoutInformationPage(QWidget):
     next_clicked = pyqtSignal(dict)
     back_clicked = pyqtSignal()
 
-    # Local row indices in layout_table (0-based), must match LAYOUT_DESCRIPTIONS order
+    # Local row indices in layout_table (0-based), must match ``LAYOUT_ROWS`` order
     ROW_CABIN_TYPE = 0
     ROW_CABIN_WIDTH = 1
     ROW_CABIN_DEPTH = 2
@@ -62,11 +62,11 @@ class LayoutInformationPage(QWidget):
     ROW_SHAFT_HEAD_SUGG = 24
     ROW_SHAFT_PIT_SUGG = 26
 
-    LOAD_CAPACITY_KEY = 'Load capacity (kg)'
-    SPEED_KEY = 'Speed (m/s)'
+    LOAD_CAPACITY_KEY = 'Load capacity'
+    SPEED_KEY = 'Speed'
     CWT_KEY = 'Counterweight location'
-    ACCESS_TYPE_KEY = 'Acces type'
-    ACCESSIBLE_YN_KEY = 'Accesible rooms/cwt safety (y/n)'
+    ACCESS_TYPE_KEY = 'Access type'
+    ACCESSIBLE_YN_KEY = 'Accessible rooms/cwt safety'
     _COMBO_OPTIONS = {
         ROW_DOOR_FIXATION: ['insert rail 40/22', 'insert rail 50/30', 'anchor bolts', 'steel structure'],
         ROW_PERMISSIBLE_SILL: ['ASME-A', 'ASME-B', 'ASME-C1', 'ASME-C2', 'EN81-40%', 'EN81-60%', 'EN81-85%'],
@@ -78,23 +78,49 @@ class LayoutInformationPage(QWidget):
         ROW_SHAFT_DIVISION_TYPE: ['structural wall', 'beam'],
     }
 
-    LAYOUT_DESCRIPTIONS = [
-        'Cabin type/shape',
-        'Cabin width (mm)', 'Cabin depth (mm)',
-        'Cladding thickness each wall (mm)',
-        'Clear cabin height (mm)', 'Structural cabin height (mm)', 'Door width (mm)',
-        'Door structural opening width (mm)', 'Door height (mm)', 'Door structural opening height (mm)',
-        'door type', 'door fixation type', 'Permissible sill load / Loading class', 'LOP type and locaion',
-        'LIP type and location', 'Lift maintenance panel type', 'Lift maintenance panel location',
-        'Shaft equipment fixation type', 'Shaft width suggested (mm)', 'Shaft width current planning (mm)',
-        'Shaft division type', 'Shaft division width (mm)', 'Shaft depth suggested (mm)',
-        'Shaft depth current planning (mm)', 'Shaft head suggested (mm)', 'Shaft head current planning (mm)',
-        'Shaft pit suggested (mm)', 'Shaft pit current planning (mm)', 'Machine room width suggested (mm)',
-        'Machine room width current planning (mm)', 'Machine room depth suggested (mm)',
-        'Machine room depth current planning (mm)',
-        'Machine room height suggested (mm)', 'Machine room height current planning (mm)',
-        'Lift vestibule width (mm)', 'Lift vestibule depth (mm)',
-    ]
+    # (json_key, description label, unit). JSON uses ``json_key`` only — units are in the Unit column.
+    LAYOUT_ROWS: tuple[tuple[str, str, str], ...] = (
+        ('Cabin type/shape', 'Cabin type/shape', '—'),
+        ('Cabin width', 'Cabin width', 'mm'),
+        ('Cabin depth', 'Cabin depth', 'mm'),
+        ('Cladding thickness each wall', 'Cladding thickness each wall', 'mm'),
+        ('Clear cabin height', 'Clear cabin height', 'mm'),
+        ('Structural cabin height', 'Structural cabin height', 'mm'),
+        ('Door width', 'Door width', 'mm'),
+        ('Door structural opening width', 'Door structural opening width', 'mm'),
+        ('Door height', 'Door height', 'mm'),
+        ('Door structural opening height', 'Door structural opening height', 'mm'),
+        ('door type', 'door type', '—'),
+        ('door fixation type', 'door fixation type', '—'),
+        ('Permissible sill load / Loading class', 'Permissible sill load / Loading class', '—'),
+        ('LOP type and location', 'LOP type and location', '—'),
+        ('LIP type and location', 'LIP type and location', '—'),
+        ('Lift maintenance panel type', 'Lift maintenance panel type', '—'),
+        ('Lift maintenance panel location', 'Lift maintenance panel location', '—'),
+        ('Shaft equipment fixation type', 'Shaft equipment fixation type', '—'),
+        ('Shaft width suggested', 'Shaft width suggested', 'mm'),
+        ('Shaft width current planning', 'Shaft width current planning', 'mm'),
+        ('Shaft division type', 'Shaft division type', '—'),
+        ('Shaft division width', 'Shaft division width', 'mm'),
+        ('Shaft depth suggested', 'Shaft depth suggested', 'mm'),
+        ('Shaft depth current planning', 'Shaft depth current planning', 'mm'),
+        ('Shaft head suggested', 'Shaft head suggested', 'mm'),
+        ('Shaft head current planning', 'Shaft head current planning', 'mm'),
+        ('Shaft pit suggested', 'Shaft pit suggested', 'mm'),
+        ('Shaft pit current planning', 'Shaft pit current planning', 'mm'),
+        ('Machine room width suggested', 'Machine room width suggested', 'mm'),
+        ('Machine room width current planning', 'Machine room width current planning', 'mm'),
+        ('Machine room depth suggested', 'Machine room depth suggested', 'mm'),
+        ('Machine room depth current planning', 'Machine room depth current planning', 'mm'),
+        ('Machine room height suggested', 'Machine room height suggested', 'mm'),
+        ('Machine room height current planning', 'Machine room height current planning', 'mm'),
+        ('Lift vestibule width', 'Lift vestibule width', 'mm'),
+        ('Lift vestibule depth', 'Lift vestibule depth', 'mm'),
+    )
+
+    @staticmethod
+    def _layout_json_key_for_row(row: int) -> str:
+        return LayoutInformationPage.LAYOUT_ROWS[row][0]
 
     def __init__(self, user_inputs):
         super().__init__()
@@ -108,7 +134,7 @@ class LayoutInformationPage(QWidget):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        for col in range(1, self.layout_table.columnCount()):
+        for col in range(2, self.layout_table.columnCount()):
             self._apply_cabin_width_for_column(col)
 
     def _parse_float(self, text):
@@ -121,7 +147,7 @@ class LayoutInformationPage(QWidget):
             return None
 
     def _apply_cabin_width_for_column(self, col):
-        i, ww = col - 1, self.layout_table.cellWidget(self.ROW_CABIN_WIDTH, col)
+        i, ww = col - 2, self.layout_table.cellWidget(self.ROW_CABIN_WIDTH, col)
         lift = merged_lift_at(self.user_inputs, i)
         if not lift or not isinstance(ww, QLineEdit):
             return
@@ -137,7 +163,7 @@ class LayoutInformationPage(QWidget):
         self._apply_cabin_depth_for_column(col)
 
     def _apply_cabin_depth_for_column(self, col):
-        i = col - 1
+        i = col - 2
         lift = merged_lift_at(self.user_inputs, i)
         dw = self.layout_table.cellWidget(self.ROW_CABIN_DEPTH, col)
         ww = self.layout_table.cellWidget(self.ROW_CABIN_WIDTH, col)
@@ -154,7 +180,7 @@ class LayoutInformationPage(QWidget):
         self._sync_derived_fields(col)
 
     def _lift_at_column(self, col):
-        i = col - 1
+        i = col - 2
         lift = merged_lift_at(self.user_inputs, i)
         return lift if lift else None
 
@@ -334,18 +360,22 @@ class LayoutInformationPage(QWidget):
         system_layout = QVBoxLayout(system_box)
 
         self.layout_table = QTableWidget()
-        self.layout_table.setColumnCount(1)
-        self.layout_table.setHorizontalHeaderLabels(['Description'])
-        self.layout_table.setRowCount(len(self.LAYOUT_DESCRIPTIONS))
+        self.layout_table.setColumnCount(2)
+        self.layout_table.setHorizontalHeaderLabels(['Description', 'Unit'])
+        self.layout_table.setRowCount(len(self.LAYOUT_ROWS))
 
-        for row, description in enumerate(self.LAYOUT_DESCRIPTIONS):
-            item = QTableWidgetItem(description)
+        for row, (_jk, label, unit) in enumerate(self.LAYOUT_ROWS):
+            item = QTableWidgetItem(label)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             self.layout_table.setItem(row, 0, item)
+            u_item = QTableWidgetItem(unit if unit else '—')
+            u_item.setFlags(u_item.flags() & ~Qt.ItemIsEditable)
+            self.layout_table.setItem(row, 1, u_item)
 
         self.layout_table.horizontalHeader().setStretchLastSection(True)
         self.layout_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.layout_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.layout_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         system_layout.addWidget(self.layout_table)
 
@@ -364,12 +394,12 @@ class LayoutInformationPage(QWidget):
         self.initialize_lift_columns()
 
     def populate_from_input(self, systems_data):
-        for col, system_data in enumerate(systems_data, start=1):
+        for col, system_data in enumerate(systems_data, start=2):
             for row in range(self.layout_table.rowCount()):
-                description = self.layout_table.item(row, 0).text()
-                if description in system_data:
+                jk = self._layout_json_key_for_row(row)
+                if jk in system_data:
                     cell_widget = self.layout_table.cellWidget(row, col)
-                    value = system_data[description]
+                    value = system_data[jk]
                     if isinstance(cell_widget, QLineEdit):
                         cell_widget.setText(str(value))
                     elif isinstance(cell_widget, QComboBox):
@@ -460,12 +490,12 @@ class LayoutInformationPage(QWidget):
         systems_data = []
 
         for idx in range(n):
-            col = idx + 1
+            col = idx + 2
             merged = dict(existing[idx]) if idx < len(existing) else {}
 
             if col < self.layout_table.columnCount():
                 for row in range(self.layout_table.rowCount()):
-                    description = self.layout_table.item(row, 0).text()
+                    jk = self._layout_json_key_for_row(row)
                     cell_widget = self.layout_table.cellWidget(row, col)
                     if isinstance(cell_widget, QLineEdit):
                         value = cell_widget.text()
@@ -473,7 +503,20 @@ class LayoutInformationPage(QWidget):
                         value = cell_widget.currentText()
                     else:
                         value = ''
-                    merged[description] = value
+                    v = value.strip() if isinstance(value, str) else value
+                    if v != '':
+                        merged[jk] = value
+                        continue
+                    if isinstance(cell_widget, QLineEdit):
+                        prev = merged.get(jk)
+                        if (
+                            prev is not None
+                            and str(prev).strip() != ''
+                            and not cell_widget.isModified()
+                        ):
+                            merged[jk] = prev
+                            continue
+                    merged[jk] = ''
 
             systems_data.append(merged)
 
@@ -488,8 +531,8 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     sample = {
         'BuildingSystems': [{'Number': '1'}],
-        'GeneralSpecification': [{'Load capacity (kg)': '630'}],
-        'LayoutInformation': [{'Cabin width (mm)': '1100'}],
+        'GeneralSpecification': [{'Load capacity': '630'}],
+        'LayoutInformation': [{'Cabin width': '1100'}],
     }
     w = LayoutInformationPage(sample)
     w.show()

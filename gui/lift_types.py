@@ -374,9 +374,9 @@ def _fmt_electrical_num(x: float, decimals: int = 2) -> str:
 ELECTRICAL_HVAC_DEFAULTS: dict[str, str] = {
     "Drive/Motor location": "MRL top",
     "Drive/Motor type": "VVVF",
-    "Power grid voltage/type (V)": "400",
-    "Diversity factor (-)": "0.7",
-    "Temperature machine room / shaft (°C)": "5-40",
+    "Power grid voltage/type": "400",
+    "Diversity factor": "0.7",
+    "Temperature machine room / shaft": "5-40",
 }
 
 
@@ -405,10 +405,10 @@ def electrical_hvac_derived_for_lift(
     i_s = prof.starting_current_a(i_r)
 
     out: dict[str, str] = {
-        "Drive/Motor Power (kW)": _fmt_electrical_num(p_kw, 2),
-        "Connected load (kVA)": _fmt_electrical_num(kva, 2),
-        "Rated current (A)": _fmt_electrical_num(i_r, 2),
-        "Starting current (factor ≈ 2) (A)": _fmt_electrical_num(i_s, 2),
+        "Drive/Motor Power": _fmt_electrical_num(p_kw, 2),
+        "Connected load": _fmt_electrical_num(kva, 2),
+        "Rated current": _fmt_electrical_num(i_r, 2),
+        "Starting current (factor ≈ 2)": _fmt_electrical_num(i_s, 2),
     }
 
     try:
@@ -417,8 +417,8 @@ def electrical_hvac_derived_for_lift(
             dc = float(raw_d)
             e85 = prof.energy_consumption_kwh(p_kw, dc)
             h86 = prof.heat_dissipation_motor_kj(e85)
-            out["Energy consumption (kWh)"] = _fmt_electrical_num(e85, 4)
-            out["Heat dissipation motor (kJ)"] = _fmt_electrical_num(h86, 2)
+            out["Energy consumption"] = _fmt_electrical_num(e85, 4)
+            out["Heat dissipation motor"] = _fmt_electrical_num(h86, 2)
     except (ValueError, TypeError, OverflowError):
         pass
 
@@ -534,12 +534,12 @@ def mechanical_loading_derived_for_lift(
     if th is not None:
         f1f2 = prof.force_f1_f2_elevator_rail_segment_kn(th)
         if f1f2 is not None:
-            out["Force F1, F2 elevator rail segment (kN)"] = str(f1f2)
+            out["Force F1, F2 elevator rail segment"] = str(f1f2)
         if cwt_no:
             f4 = int(round((th / 2.5 * 600.0) / 1000.0)) + 1
         else:
             f4 = int(round((th / 2.5 * 600.0 + 1.7 * m_kg * g) / 1000.0)) + 1
-        out["Force F4, per counterweight rail segment (kN)"] = str(f4)
+        out["Force F4, per counterweight rail segment"] = str(f4)
 
     f3 = int(round(2.3 * m_kg * g / 1000.0 * 4.0 / n_car)) + 1
     f5 = int(round(1.7 * m_kg * g / 1000.0 * 4.0 / n_cwt))
@@ -547,11 +547,11 @@ def mechanical_loading_derived_for_lift(
     f7 = int(round(1.7 * m_kg * g / 1000.0)) + 1
     f8 = int(round(2.3 * m_kg * g / 1000.0)) + 1
 
-    out["Force F3, each buffer (kN)"] = str(f3)
-    out["Force F5, per counterweight buffer (kN)"] = str(f5)
-    out["Force F6, static shaft door (kN)"] = str(f6)
-    out["Force F7, static counterweight (kN)"] = str(f7)
-    out["Force F8, static cabin (kN)"] = str(f8)
+    out["Force F3, each buffer"] = str(f3)
+    out["Force F5, per counterweight buffer"] = str(f5)
+    out["Force F6, static shaft door"] = str(f6)
+    out["Force F7, static counterweight"] = str(f7)
+    out["Force F8, static cabin"] = str(f8)
 
     cw = _parse_width_mm(str(cabin_width_mm or ""))
     cd = _parse_width_mm(str(cabin_depth_mm or ""))
@@ -570,10 +570,10 @@ def mechanical_loading_derived_for_lift(
             fx_cwt = round(2.0 * g * 1.5 * m_kg * 30.0 / 2.0 / 2000.0 / 1000.0 + 0.1, 1)
             fy_cwt = round(2.0 * g * 1.5 * m_kg * 41.0 / 2000.0 / 1000.0 + 0.1, 1)
 
-        out["Force Fx, cabin rail (kN)"] = _fmt_electrical_num(fx_cab, 1)
-        out["Force Fy, cabin rail (kN)"] = _fmt_electrical_num(fy_cab, 1)
-        out["Force Fx, counterweight rail (kN)"] = _fmt_electrical_num(fx_cwt, 1)
-        out["Force Fy, counterweight rail (kN)"] = _fmt_electrical_num(fy_cwt, 1)
+        out["Force Fx, cabin rail"] = _fmt_electrical_num(fx_cab, 1)
+        out["Force Fy, cabin rail"] = _fmt_electrical_num(fy_cab, 1)
+        out["Force Fx, counterweight rail"] = _fmt_electrical_num(fx_cwt, 1)
+        out["Force Fy, counterweight rail"] = _fmt_electrical_num(fy_cwt, 1)
 
     return out
 
