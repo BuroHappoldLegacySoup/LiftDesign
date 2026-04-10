@@ -1,10 +1,16 @@
-import json
+import sys
+from pathlib import Path
 
-# Function to convert JSON file to Python dictionary
+_root = Path(__file__).resolve().parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
+from gui.project_json import load_project_json
+
+
 def json_to_dict(file_path):
-    with open(file_path, 'r') as file:
-        data = json.load(file)
-    return data
+    return load_project_json(file_path)
+
 
 # Example usage
 file_path = r"C:\Users\vmylavarapu\LiftDesigner\Projects\241023_LiftDesigner_3.json"

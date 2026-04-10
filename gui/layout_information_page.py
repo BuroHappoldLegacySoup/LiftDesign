@@ -1,15 +1,21 @@
 """
 Layout Information — from Cabin width through Lift vestibule depth (per lift).
-Merges into existing user_inputs['LiftSystems'] from General specification.
+Persisted under ``user_inputs['LayoutInformation']`` (general spec is ``GeneralSpecification``).
 """
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QGroupBox, QPushButton, QScrollArea,
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QComboBox,
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator, QShowEvent
 import os
 import sys
+
+from .project_lift_schema import (
+    KEY_LAYOUT_INFORMATION,
+    merged_lift_at,
+    normalize_project_lift_data,
+)
 
 try:
     from .lift_types import (
@@ -30,6 +36,7 @@ except ImportError:  # running as ``python gui/layout_information_page.py``
 
 class LayoutInformationPage(QWidget):
     next_clicked = pyqtSignal(dict)
+    back_clicked = pyqtSignal()
 
     # Local row indices in layout_table (0-based), must match LAYOUT_DESCRIPTIONS order
     ROW_CABIN_TYPE = 0
@@ -92,11 +99,12 @@ class LayoutInformationPage(QWidget):
     def __init__(self, user_inputs):
         super().__init__()
         self.user_inputs = user_inputs
+        normalize_project_lift_data(self.user_inputs)
         self.number_of_lifts = len(user_inputs['BuildingSystems'])
         self.initUI()
 
-        if 'LiftSystems' in self.user_inputs:
-            self.populate_from_input(self.user_inputs['LiftSystems'])
+        if self.user_inputs.get(KEY_LAYOUT_INFORMATION):
+            self.populate_from_input(self.user_inputs[KEY_LAYOUT_INFORMATION])
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -113,11 +121,11 @@ class LayoutInformationPage(QWidget):
             return None
 
     def _apply_cabin_width_for_column(self, col):
-        lifts = self.user_inputs.get('LiftSystems') or []
         i, ww = col - 1, self.layout_table.cellWidget(self.ROW_CABIN_WIDTH, col)
-        if not (0 <= i < len(lifts)) or not isinstance(ww, QLineEdit):
+        lift = merged_lift_at(self.user_inputs, i)
+        if not lift or not isinstance(ww, QLineEdit):
             return
-        v = self._parse_float(str(lifts[i].get(self.LOAD_CAPACITY_KEY, '') or ''))
+        v = self._parse_float(str(lift.get(self.LOAD_CAPACITY_KEY, '') or ''))
         if v is None:
             self._sync_derived_fields(col)
             return
@@ -129,14 +137,14 @@ class LayoutInformationPage(QWidget):
         self._apply_cabin_depth_for_column(col)
 
     def _apply_cabin_depth_for_column(self, col):
-        lifts = self.user_inputs.get('LiftSystems') or []
         i = col - 1
+        lift = merged_lift_at(self.user_inputs, i)
         dw = self.layout_table.cellWidget(self.ROW_CABIN_DEPTH, col)
         ww = self.layout_table.cellWidget(self.ROW_CABIN_WIDTH, col)
-        if not (0 <= i < len(lifts)) or not isinstance(dw, QLineEdit) or not isinstance(ww, QLineEdit):
+        if not lift or not isinstance(dw, QLineEdit) or not isinstance(ww, QLineEdit):
             self._sync_derived_fields(col)
             return
-        v = self._parse_float(str(lifts[i].get(self.LOAD_CAPACITY_KEY, '') or ''))
+        v = self._parse_float(str(lift.get(self.LOAD_CAPACITY_KEY, '') or ''))
         if v is None:
             self._sync_derived_fields(col)
             return
@@ -146,11 +154,9 @@ class LayoutInformationPage(QWidget):
         self._sync_derived_fields(col)
 
     def _lift_at_column(self, col):
-        lifts = self.user_inputs.get('LiftSystems') or []
         i = col - 1
-        if 0 <= i < len(lifts):
-            return lifts[i]
-        return None
+        lift = merged_lift_at(self.user_inputs, i)
+        return lift if lift else None
 
     def _cladding_mm(self, col):
         w = self.layout_table.cellWidget(self.ROW_CLADDING, col)
@@ -346,7 +352,14 @@ class LayoutInformationPage(QWidget):
         save_button = QPushButton('Save and Proceed')
         save_button.setStyleSheet("background-color: white;")
         save_button.clicked.connect(self.collect_data_and_go_next)
-        scroll_layout.addWidget(save_button)
+        nav_row = QHBoxLayout()
+        back_button = QPushButton('← Back to previous page')
+        back_button.setStyleSheet("background-color: white;")
+        back_button.clicked.connect(self.back_clicked.emit)
+        nav_row.addWidget(back_button)
+        nav_row.addStretch()
+        nav_row.addWidget(save_button)
+        scroll_layout.addLayout(nav_row)
 
         self.initialize_lift_columns()
 
@@ -436,30 +449,38 @@ class LayoutInformationPage(QWidget):
 
         self._apply_cabin_width_for_column(col_position)
 
-    def collect_data_and_go_next(self):
+    def merge_layout_into_lift_systems(self):
+        """Write layout table columns into ``user_inputs['LayoutInformation']`` (one dict per lift)."""
+        building = self.user_inputs.get('BuildingSystems') or []
+        n = len(building)
+        if n == 0:
+            return
+
+        existing = self.user_inputs.get(KEY_LAYOUT_INFORMATION) or []
         systems_data = []
-        existing = self.user_inputs.get('LiftSystems') or []
 
-        for col in range(1, self.layout_table.columnCount()):
-            merged = {}
-            idx = col - 1
-            if idx < len(existing):
-                merged = dict(existing[idx])
+        for idx in range(n):
+            col = idx + 1
+            merged = dict(existing[idx]) if idx < len(existing) else {}
 
-            for row in range(self.layout_table.rowCount()):
-                description = self.layout_table.item(row, 0).text()
-                cell_widget = self.layout_table.cellWidget(row, col)
-                if isinstance(cell_widget, QLineEdit):
-                    value = cell_widget.text()
-                elif isinstance(cell_widget, QComboBox):
-                    value = cell_widget.currentText()
-                else:
-                    value = ''
-                merged[description] = value
+            if col < self.layout_table.columnCount():
+                for row in range(self.layout_table.rowCount()):
+                    description = self.layout_table.item(row, 0).text()
+                    cell_widget = self.layout_table.cellWidget(row, col)
+                    if isinstance(cell_widget, QLineEdit):
+                        value = cell_widget.text()
+                    elif isinstance(cell_widget, QComboBox):
+                        value = cell_widget.currentText()
+                    else:
+                        value = ''
+                    merged[description] = value
 
             systems_data.append(merged)
 
-        self.user_inputs['LiftSystems'] = systems_data
+        self.user_inputs[KEY_LAYOUT_INFORMATION] = systems_data
+
+    def collect_data_and_go_next(self):
+        self.merge_layout_into_lift_systems()
         self.next_clicked.emit(self.user_inputs)
 
 
@@ -467,11 +488,8 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     sample = {
         'BuildingSystems': [{'Number': '1'}],
-        'LiftSystems': [{
-            'Counterweight location': 'CWT-Left',
-            'Load capacity (kg)': '630',
-            'Cabin width (mm)': '1100',
-        }],
+        'GeneralSpecification': [{'Load capacity (kg)': '630'}],
+        'LayoutInformation': [{'Cabin width (mm)': '1100'}],
     }
     w = LayoutInformationPage(sample)
     w.show()

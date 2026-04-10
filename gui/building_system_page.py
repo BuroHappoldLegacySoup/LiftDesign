@@ -14,6 +14,10 @@ class BuildingSystemPage(QWidget):
         self.initUI()
         if input_data and 'BuildingSystems' in input_data:
             self.populate_from_input(input_data['BuildingSystems'])
+        # New projects only set FileName (truthy dict) — we still need ≥1 lift column or sync saves [].
+        # Empty ``BuildingSystems`` in JSON also yields no columns until this runs.
+        if self.system_table.columnCount() <= 1:
+            self.add_lift_column()
 
     def initUI(self):
         self.setMinimumSize(800, 600)  # Set fixed size for the page
@@ -82,10 +86,6 @@ class BuildingSystemPage(QWidget):
         save_button.clicked.connect(self.collect_data_and_go_next)
         scroll_layout.addWidget(save_button)
 
-        # If no input data, ensure there's at least one lift to start with
-        if not self.user_inputs:
-            self.add_lift_column()
-
     def populate_from_input(self, systems_data):
         # First, add the required number of columns
         num_systems = len(systems_data)
@@ -127,7 +127,8 @@ class BuildingSystemPage(QWidget):
         if col_position > 1:  # Ensure there's always at least one lift column
             self.system_table.removeColumn(col_position)
 
-    def collect_data_and_go_next(self):
+    def sync_to_user_inputs(self):
+        """Write building-system table into ``user_inputs`` (used before final JSON save)."""
         systems_data = []
         for col in range(1, self.system_table.columnCount()):
             system_data = {}
@@ -139,8 +140,10 @@ class BuildingSystemPage(QWidget):
                     value = self.system_table.cellWidget(row, col).currentText()
                 system_data[description] = value
             systems_data.append(system_data)
-        
         self.user_inputs['BuildingSystems'] = systems_data
+
+    def collect_data_and_go_next(self):
+        self.sync_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 if __name__ == '__main__':

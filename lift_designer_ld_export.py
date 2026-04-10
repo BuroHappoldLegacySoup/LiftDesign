@@ -10,6 +10,8 @@ import csv
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, MutableMapping, Sequence
 
+from gui.project_lift_schema import merged_lift_at
+
 __all__ = [
     "LDExportRow",
     "build_ld_rows_from_user_inputs",
@@ -34,10 +36,7 @@ def _s(v: Any) -> str:
 
 
 def _lift(ui: Mapping[str, Any], i: int) -> Dict[str, Any]:
-    lifts = ui.get("LiftSystems") or []
-    if 0 <= i < len(lifts) and isinstance(lifts[i], dict):
-        return lifts[i]
-    return {}
+    return merged_lift_at(ui, i) if isinstance(ui, dict) else {}
 
 
 def _forces(ui: Mapping[str, Any], i: int) -> Dict[str, Any]:

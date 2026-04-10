@@ -9,9 +9,16 @@ from typing import Any, List, Dict, Optional
 # Keys to exclude from comparison (metadata, not user data)
 EXCLUDED_KEYS = {'ChangeHistory', '_baseline', 'FileName'}
 
-# Map data section keys to sidebar page names (LiftSystems resolved per-field in _path_to_page)
+from gui.project_lift_schema import LAYOUT_INFORMATION_FIELD_KEYS
+
+# Backwards-compatible alias (layout fields split from legacy ``LiftSystems``)
+LIFT_SYSTEMS_LAYOUT_FIELDS = LAYOUT_INFORMATION_FIELD_KEYS
+
+# Map data section keys to sidebar page names (legacy LiftSystems resolved per-field in _path_to_page)
 SECTION_TO_PAGE = {
     "BuildingSystems": "1. Building System Information",
+    "GeneralSpecification": "2. General specification",
+    "LayoutInformation": "3. Layout Information",
     "LiftDrive": "4. Electrical & HVAC",
     "Forces": "5. Mechanical loading",
     "Compliance": "6. Applicable codes",
@@ -19,25 +26,6 @@ SECTION_TO_PAGE = {
     "Floors": "8. Building Floor Levels",
     "Cost": "9. Cost",
 }
-
-# Fields edited on Layout Information page (same keys as layout_information_page.LAYOUT_DESCRIPTIONS)
-LIFT_SYSTEMS_LAYOUT_FIELDS = frozenset({
-    'Cabin type/shape',
-    'Cabin width (mm)', 'Cabin depth (mm)',
-    'Cladding thickness each wall (mm)',
-    'Clear cabin height (mm)', 'Structural cabin height (mm)', 'Door width (mm)',
-    'Door structural opening width (mm)', 'Door height (mm)', 'Door structural opening height (mm)',
-    'door type', 'door fixation type', 'Permissible sill load / Loading class', 'LOP type and locaion',
-    'LIP type and location', 'Lift maintenance panel type', 'Lift maintenance panel location',
-    'Shaft equipment fixation type', 'Shaft width suggested (mm)', 'Shaft width current planning (mm)',
-    'Shaft division type', 'Shaft division width (mm)', 'Shaft depth suggested (mm)',
-    'Shaft depth current planning (mm)', 'Shaft head suggested (mm)', 'Shaft head current planning (mm)',
-    'Shaft pit suggested (mm)', 'Shaft pit current planning (mm)', 'Machine room width suggested (mm)',
-    'Machine room width current planning (mm)', 'Machine room depth suggested (mm)',
-    'Machine room depth current planning (mm)',
-    'Machine room height suggested (mm)', 'Machine room height current planning (mm)',
-    'Lift vestibule width (mm)', 'Lift vestibule depth (mm)',
-})
 
 
 def _normalize_value(val: Any) -> Any:
@@ -145,6 +133,8 @@ def _path_to_display_name(path: str) -> str:
     display_parts = []
     section_names = {
         "BuildingSystems": "Building System",
+        "GeneralSpecification": "General specification",
+        "LayoutInformation": "Layout Information",
         "LiftSystems": "Lift System",
         "LiftDrive": "Electrical & HVAC",
         "Forces": "Force",
@@ -192,6 +182,10 @@ def _path_to_page(path: str) -> str:
     if not parts:
         return ""
     first = parts[0]
+    if first == "GeneralSpecification":
+        return "2. General specification"
+    if first == "LayoutInformation":
+        return "3. Layout Information"
     if first == "LiftSystems" and len(parts) >= 3:
         field_key = parts[-1]
         if field_key in LIFT_SYSTEMS_LAYOUT_FIELDS:
@@ -218,10 +212,13 @@ def compute_changes(baseline: Dict, current: Dict) -> List[Dict[str, Any]]:
 
 def prepare_baseline(data: Dict) -> Dict:
     """Create a clean baseline copy for comparison (excludes metadata)."""
+    from gui.project_lift_schema import normalize_project_lift_data
+
     baseline = {}
     for key, value in data.items():
         if key not in EXCLUDED_KEYS:
             baseline[key] = copy.deepcopy(value)
+    normalize_project_lift_data(baseline)
     return baseline
 
 

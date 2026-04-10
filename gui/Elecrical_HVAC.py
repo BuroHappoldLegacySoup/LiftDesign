@@ -4,13 +4,15 @@ Derived power / current / energy / heat use the same formulas for every load col
 values differ via permissible persons (Excel row 21) and duty cycle (row 78).
 """
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QGroupBox, QPushButton, QScrollArea,
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QCheckBox, QComboBox,
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator, QShowEvent
 import os
 import sys
+
+from .project_lift_schema import merged_lift_at, normalize_project_lift_data
 
 try:
     from .lift_types import ELECTRICAL_HVAC_DEFAULTS, electrical_hvac_derived_for_lift
@@ -23,6 +25,8 @@ except ImportError:  # running as ``python gui/Elecrical_HVAC.py``
 
 class LiftDriveControlPage(QWidget):
     """Lift drive control / Electrical & HVAC; persisted under ``user_inputs['LiftDrive']``."""
+
+    back_clicked = pyqtSignal()
 
     next_clicked = pyqtSignal(dict)
 
@@ -61,6 +65,7 @@ class LiftDriveControlPage(QWidget):
     def __init__(self, user_inputs):
         super().__init__()
         self.user_inputs = user_inputs
+        normalize_project_lift_data(self.user_inputs)
         self.number_of_lifts = len(user_inputs["BuildingSystems"])
         self.initUI()
 
@@ -141,7 +146,14 @@ class LiftDriveControlPage(QWidget):
         save_button = QPushButton("Save and Proceed")
         save_button.setStyleSheet("background-color: white;")
         save_button.clicked.connect(self.collect_data_and_go_next)
-        scroll_layout.addWidget(save_button)
+        nav_row = QHBoxLayout()
+        back_button = QPushButton("← Back to previous page")
+        back_button.setStyleSheet("background-color: white;")
+        back_button.clicked.connect(self.back_clicked.emit)
+        nav_row.addWidget(back_button)
+        nav_row.addStretch()
+        nav_row.addWidget(save_button)
+        scroll_layout.addLayout(nav_row)
 
         self.initialize_lift_columns()
 
@@ -219,11 +231,10 @@ class LiftDriveControlPage(QWidget):
         self._apply_computed_for_column(col_position)
 
     def _apply_computed_for_column(self, col):
-        lifts = self.user_inputs.get("LiftSystems") or []
         idx = col - 1
-        if not (0 <= idx < len(lifts)):
+        lift = merged_lift_at(self.user_inputs, idx)
+        if not lift:
             return
-        lift = lifts[idx]
         load = lift.get(self.LOAD_CAPACITY_KEY, "")
         persons = lift.get(self.PERSONS_KEY, "")
         duty_w = self.system_table.cellWidget(self.ROW_DUTY_CYCLE, col)
@@ -251,7 +262,8 @@ class LiftDriveControlPage(QWidget):
             else:
                 w.setText("")
 
-    def collect_data_and_go_next(self):
+    def sync_lift_drive_to_user_inputs(self):
+        """Write Electrical & HVAC table into ``user_inputs``."""
         systems_data = []
         for col in range(1, self.system_table.columnCount()):
             system_data = {}
@@ -270,6 +282,9 @@ class LiftDriveControlPage(QWidget):
             systems_data.append(system_data)
 
         self.user_inputs["LiftDrive"] = systems_data
+
+    def collect_data_and_go_next(self):
+        self.sync_lift_drive_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 
@@ -277,12 +292,13 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     sample_input = {
         "BuildingSystems": [{"Number": "1"}],
-        "LiftSystems": [
+        "GeneralSpecification": [
             {
                 "Load capacity (kg)": "630",
                 "Permissible number of persons (Pers.)": "17",
             }
         ],
+        "LayoutInformation": [{}],
         "LiftDrive": [],
     }
     ex = LiftDriveControlPage(sample_input)

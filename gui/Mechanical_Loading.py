@@ -2,6 +2,7 @@ from PyQt5.QtWidgets import (
     QApplication,
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QGroupBox,
     QPushButton,
     QCheckBox,
@@ -16,6 +17,8 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator, QShowEvent
 import os
 import sys
+
+from .project_lift_schema import ensure_lift_section_slots, merged_lift_at
 
 try:
     from .lift_types import (
@@ -42,6 +45,7 @@ class ForceSpecPage(QWidget):
     """Mechanical loading — Excel ``VT Standard configs`` rows 90–105."""
 
     next_clicked = pyqtSignal(dict)
+    back_clicked = pyqtSignal()
 
     DESCRIPTIONS = [
         "Rail weight car (kg/m)",
@@ -88,9 +92,7 @@ class ForceSpecPage(QWidget):
         super().__init__()
         self.user_inputs = user_inputs
         self.number_of_lifts = len(user_inputs.get("BuildingSystems") or [])
-        lifts = self.user_inputs.setdefault("LiftSystems", [])
-        while len(lifts) < self.number_of_lifts:
-            lifts.append({})
+        ensure_lift_section_slots(self.user_inputs, self.number_of_lifts)
         self.initUI()
 
         if "Forces" in self.user_inputs:
@@ -102,11 +104,8 @@ class ForceSpecPage(QWidget):
             self._sync_derived_fields(col)
 
     def _lift_at_column(self, col: int) -> dict:
-        lifts = self.user_inputs.get("LiftSystems") or []
         i = col - 1
-        if 0 <= i < len(lifts):
-            return lifts[i]
-        return {}
+        return merged_lift_at(self.user_inputs, i)
 
     def _resolved_cabin_width_depth_mm(self, lift: dict):
         """
@@ -243,7 +242,14 @@ class ForceSpecPage(QWidget):
         save_button = QPushButton("Save and Proceed")
         save_button.setStyleSheet("background-color: white;")
         save_button.clicked.connect(self.collect_data_and_go_next)
-        scroll_layout.addWidget(save_button)
+        nav_row = QHBoxLayout()
+        back_button = QPushButton("← Back to previous page")
+        back_button.setStyleSheet("background-color: white;")
+        back_button.clicked.connect(self.back_clicked.emit)
+        nav_row.addWidget(back_button)
+        nav_row.addStretch()
+        nav_row.addWidget(save_button)
+        scroll_layout.addLayout(nav_row)
 
         self.initialize_lift_columns()
 
@@ -314,7 +320,8 @@ class ForceSpecPage(QWidget):
 
         self._sync_derived_fields(col_position)
 
-    def collect_data_and_go_next(self):
+    def sync_forces_to_user_inputs(self):
+        """Write mechanical loading table into ``user_inputs``."""
         forces_data = []
         for col in range(1, self.force_table.columnCount()):
             force_data = {}
@@ -335,6 +342,9 @@ class ForceSpecPage(QWidget):
             forces_data.append(force_data)
 
         self.user_inputs["Forces"] = forces_data
+
+    def collect_data_and_go_next(self):
+        self.sync_forces_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 
@@ -342,14 +352,15 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     sample_input = {
         "BuildingSystems": [{"Number": "1", "System Name": "Lift A"}],
-        "LiftSystems": [
+        "GeneralSpecification": [
             {
                 "Load capacity (kg)": "630",
                 "Travel height (m)": "20",
-                "Cabin width (mm)": "1100",
-                "Cabin depth (mm)": "1400",
                 "Accesible rooms/cwt safety (y/n)": "no",
             }
+        ],
+        "LayoutInformation": [
+            {"Cabin width (mm)": "1100", "Cabin depth (mm)": "1400"},
         ],
         "Forces": [],
     }

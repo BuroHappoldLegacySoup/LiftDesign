@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QApplication, QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
-    QWidget, QVBoxLayout, QGroupBox, QPushButton, QScrollArea, QLineEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, QScrollArea, QLineEdit,
 )
 from PyQt5.QtGui import QDoubleValidator
 from PyQt5.QtCore import pyqtSignal, Qt
@@ -9,6 +9,7 @@ import sys
 
 class InterfacesPage(QWidget):
     next_clicked = pyqtSignal(dict)
+    back_clicked = pyqtSignal()
 
     _YES_NO_ITEMS = ('', 'yes', 'no')
     _POWER_TYPE_ITEMS = ('', 'UPS', 'Generator')
@@ -102,7 +103,14 @@ class InterfacesPage(QWidget):
         save_button = QPushButton('Save and Proceed')
         save_button.setStyleSheet("background-color: white;")
         save_button.clicked.connect(self.collect_data_and_go_next)
-        scroll_layout.addWidget(save_button)
+        nav_row = QHBoxLayout()
+        back_button = QPushButton('← Back to previous page')
+        back_button.setStyleSheet("background-color: white;")
+        back_button.clicked.connect(self.back_clicked.emit)
+        nav_row.addWidget(back_button)
+        nav_row.addStretch()
+        nav_row.addWidget(save_button)
+        scroll_layout.addLayout(nav_row)
 
         self.initialize_lift_columns()
 
@@ -202,7 +210,8 @@ class InterfacesPage(QWidget):
                 elif isinstance(cell_widget, QLineEdit):
                     cell_widget.setText(str(value))
 
-    def collect_data_and_go_next(self):
+    def sync_emergency_to_user_inputs(self):
+        """Write technical interfaces table into ``user_inputs``."""
         emergency_data = []
         for col in range(1, self.interfaces_table.columnCount()):
             emergency_entry = {}
@@ -223,6 +232,9 @@ class InterfacesPage(QWidget):
             emergency_data.append(emergency_entry)
 
         self.user_inputs['Emergency'] = emergency_data
+
+    def collect_data_and_go_next(self):
+        self.sync_emergency_to_user_inputs()
         self.next_clicked.emit(self.user_inputs)
 
 
