@@ -216,6 +216,52 @@ def _align_floors_list_to_building_systems(data: MutableMapping[str, Any]) -> No
         floors.append({f"Lift {len(floors) + 1}": []})
 
 
+def _general_spec_has_floor_row_count(entry: Dict[str, Any]) -> bool:
+    """True if **Number of floors** or **Stops** (canonical or legacy) is set to a positive integer."""
+    for key in (
+        "Number of floors",
+        "Stops",
+        "Number of floors (Stck.)",
+        "Stops (Stck.)",
+    ):
+        raw = entry.get(key, "")
+        if raw is None or not str(raw).strip():
+            continue
+        try:
+            n = int(str(raw).strip())
+            if n >= 1:
+                return True
+        except (ValueError, TypeError):
+            continue
+    return False
+
+
+def _backfill_num_floors_from_floors_list(data: MutableMapping[str, Any]) -> None:
+    """When **Number of floors** is blank but ``Floors`` has rows (e.g. after copy), sync the count.
+
+    Without this, the building floor table assumes one row, reload looks like data loss, and saves
+    can overwrite the copied JSON with a single blank row.
+    """
+    gen = data.get(KEY_GENERAL_SPECIFICATION)
+    floors = data.get(KEY_FLOORS)
+    if not isinstance(gen, list) or not isinstance(floors, list):
+        return
+    for i in range(min(len(gen), len(floors))):
+        gi = gen[i]
+        if not isinstance(gi, dict):
+            continue
+        if _general_spec_has_floor_row_count(gi):
+            continue
+        fi = floors[i]
+        if not isinstance(fi, dict):
+            continue
+        key = f"Lift {i + 1}"
+        lst = fi.get(key)
+        if not isinstance(lst, list) or len(lst) < 1:
+            continue
+        gi["Number of floors"] = str(len(lst))
+
+
 def split_legacy_lift_systems_entry(entry: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
     """Split one legacy combined lift dict into general-spec vs layout dicts."""
     general: Dict[str, Any] = {}
@@ -342,6 +388,8 @@ def normalize_project_lift_data(data: MutableMapping[str, Any]) -> None:
         for entry in gen:
             if isinstance(entry, dict):
                 migrate_general_specification_dict(entry)
+
+    _backfill_num_floors_from_floors_list(data)
 
     lay_m = data.get(KEY_LAYOUT_INFORMATION)
     if isinstance(lay_m, list):

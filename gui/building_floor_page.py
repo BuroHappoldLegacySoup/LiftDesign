@@ -136,7 +136,8 @@ class BuildingFloorPage(QWidget):
     def _floor_row_count_from_lift_system(lift_system: dict) -> int:
         """
         Rows per lift = General specification **Number of floors** when set;
-        otherwise **Stops** for legacy projects. Minimum 1.
+        otherwise **Stops** for legacy projects.
+        Returns ``0`` when neither is set so callers can fall back to saved ``Floors`` JSON.
         """
         for key in (
             LS_KEY_NUM_FLOORS,
@@ -153,7 +154,7 @@ class BuildingFloorPage(QWidget):
                     return n
             except (ValueError, TypeError):
                 continue
-        return 1
+        return 0
 
     def __init__(self, user_inputs):
         super().__init__()
@@ -257,9 +258,17 @@ class BuildingFloorPage(QWidget):
     def process_lift_data(self):
         self.lifts_data = []
         n_lifts = len(self.user_inputs.get('BuildingSystems') or [])
+        floors_top = self.user_inputs.get(KEY_FLOORS) or []
         for i in range(n_lifts):
             lift_system = merged_lift_at(self.user_inputs, i)
             n = self._floor_row_count_from_lift_system(lift_system)
+            if n < 1:
+                saved = []
+                if i < len(floors_top) and isinstance(floors_top[i], dict):
+                    saved = self._floor_rows_from_saved_lift_dict(i, floors_top[i])
+                n = len(saved) if saved else 0
+            if n < 1:
+                n = 1
             self.lifts_data.append({
                 'lift_number': i + 1,
                 'num_floors': n,
