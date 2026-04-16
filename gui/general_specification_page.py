@@ -4,7 +4,6 @@ General specification — inputs from System Type through Adjacent access (per l
 from __future__ import annotations
 
 import copy
-import json
 import sys
 import unicodedata
 from typing import Any
@@ -13,10 +12,9 @@ from PyQt5.QtCore import QLocale
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QComboBox,
-    QPlainTextEdit, QCheckBox,
 )
 from PyQt5.QtCore import pyqtSignal, Qt
-from PyQt5.QtGui import QDoubleValidator, QFont
+from PyQt5.QtGui import QDoubleValidator
 
 from .lift_types import LOAD_CAPACITY_KG, LiftSystemType, permissible_persons_for_capacity
 from .project_lift_schema import (
@@ -117,8 +115,6 @@ class GeneralSpecificationPage(QWidget):
         self.populate_from_input(systems)
         self._apply_general_spec_widgets_to_lift_systems_merge(systems)
         self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems
-
-        self._update_json_debug_panel()
 
     def _sync_lift_systems_to_user_inputs(self):
         """Keep general-spec columns in ``user_inputs['GeneralSpecification']`` aligned with the table."""
@@ -255,21 +251,6 @@ class GeneralSpecificationPage(QWidget):
         self.populate_from_input(systems)
         self._apply_general_spec_widgets_to_lift_systems_merge(systems)
         self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems
-        self._update_json_debug_panel()
-
-    def _update_json_debug_panel(self) -> None:
-        if getattr(self, '_json_debug_edit', None) is None:
-            return
-        raw = self.user_inputs.get(KEY_GENERAL_SPECIFICATION)
-        text = json.dumps(raw, ensure_ascii=False, indent=2)
-        self._json_debug_edit.setPlainText(
-            text if raw is not None else '(no GeneralSpecification in project data)'
-        )
-
-    def _on_json_debug_toggled(self, checked: bool) -> None:
-        if getattr(self, '_json_debug_edit', None) is not None:
-            self._json_debug_edit.setVisible(checked)
-        self._update_json_debug_panel()
 
     def _apply_persons_for_load_column(self, col: int, load_text: str) -> None:
         """Row 21 persons from nominal load (kg) — Excel / VT standard table."""
@@ -337,29 +318,6 @@ class GeneralSpecificationPage(QWidget):
         nav_row.addWidget(save_button)
         scroll_layout.addLayout(nav_row)
 
-        dbg_header = QHBoxLayout()
-        self._json_debug_checkbox = QCheckBox('Show JSON debug (GeneralSpecification in project data)')
-        self._json_debug_checkbox.setChecked(False)
-        self._json_debug_checkbox.toggled.connect(self._on_json_debug_toggled)
-        dbg_header.addWidget(self._json_debug_checkbox)
-        dbg_header.addStretch()
-        scroll_layout.addLayout(dbg_header)
-
-        self._json_debug_edit = QPlainTextEdit()
-        self._json_debug_edit.setReadOnly(True)
-        self._json_debug_edit.setVisible(False)
-        mono = QFont('Consolas', 9)
-        if not mono.exactMatch():
-            mono = QFont('Courier New', 9)
-        self._json_debug_edit.setFont(mono)
-        self._json_debug_edit.setPlaceholderText(
-            'Shows GeneralSpecification in the live project dict (what Save writes). '
-            'Enable the checkbox to view.'
-        )
-
-        self._json_debug_edit.setMaximumHeight(160)
-        scroll_layout.addWidget(self._json_debug_edit)
-
         self.initialize_lift_columns()
 
     def populate_from_input(self, systems_data):
@@ -407,7 +365,10 @@ class GeneralSpecificationPage(QWidget):
     def add_lift_column(self):
         col_position = self.system_table.columnCount()
         self.system_table.insertColumn(col_position)
-        self.system_table.setHorizontalHeaderItem(col_position, QTableWidgetItem(f'Lift {col_position}'))
+        # Columns 0–1 are Description + Unit; first lift column is index 2 → label Lift 1.
+        self.system_table.setHorizontalHeaderItem(
+            col_position, QTableWidgetItem(f'Lift {col_position - 1}')
+        )
 
         for row in range(self.system_table.rowCount()):
             if row == 0:

@@ -274,7 +274,9 @@ class ForceSpecPage(QWidget):
     def add_lift_column(self):
         col_position = self.force_table.columnCount()
         self.force_table.insertColumn(col_position)
-        self.force_table.setHorizontalHeaderItem(col_position, QTableWidgetItem(f"Lift {col_position}"))
+        self.force_table.setHorizontalHeaderItem(
+            col_position, QTableWidgetItem(f"Lift {col_position - 1}")
+        )
 
         lift = self._lift_at_column(col_position)
 

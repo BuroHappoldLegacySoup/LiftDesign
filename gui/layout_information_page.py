@@ -415,7 +415,9 @@ class LayoutInformationPage(QWidget):
     def add_lift_column(self):
         col_position = self.layout_table.columnCount()
         self.layout_table.insertColumn(col_position)
-        self.layout_table.setHorizontalHeaderItem(col_position, QTableWidgetItem(f'Lift {col_position}'))
+        self.layout_table.setHorizontalHeaderItem(
+            col_position, QTableWidgetItem(f'Lift {col_position - 1}')
+        )
 
         for row in range(self.layout_table.rowCount()):
             if row == self.ROW_CABIN_TYPE:

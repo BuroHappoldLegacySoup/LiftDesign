@@ -219,7 +219,9 @@ class LiftDriveControlPage(QWidget):
     def add_lift_column(self):
         col_position = self.system_table.columnCount()
         self.system_table.insertColumn(col_position)
-        self.system_table.setHorizontalHeaderItem(col_position, QTableWidgetItem(f"Lift {col_position}"))
+        self.system_table.setHorizontalHeaderItem(
+            col_position, QTableWidgetItem(f"Lift {col_position - 1}")
+        )
 
         for row in range(self.system_table.rowCount()):
             if row == self.ROW_DRIVE_MOTOR_LOCATION:

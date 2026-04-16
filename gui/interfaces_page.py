@@ -142,7 +142,9 @@ class InterfacesPage(QWidget):
     def add_lift_column(self):
         col_position = self.interfaces_table.columnCount()
         self.interfaces_table.insertColumn(col_position)
-        self.interfaces_table.setHorizontalHeaderItem(col_position, QTableWidgetItem(f'Lift {col_position}'))
+        self.interfaces_table.setHorizontalHeaderItem(
+            col_position, QTableWidgetItem(f'Lift {col_position - 1}')
+        )
 
         for row in range(self.interfaces_table.rowCount()):
             if row in self._ROW_COMBO_YES_NO:

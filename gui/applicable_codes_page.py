@@ -139,7 +139,9 @@ class ApplicableCodesPage(QWidget):
     def add_lift_column(self):
         col_position = self.codes_table.columnCount()
         self.codes_table.insertColumn(col_position)
-        self.codes_table.setHorizontalHeaderItem(col_position, QTableWidgetItem(f'Lift {col_position}'))
+        self.codes_table.setHorizontalHeaderItem(
+            col_position, QTableWidgetItem(f'Lift {col_position - 1}')
+        )
 
         for row in range(self.codes_table.rowCount()):
             if row == self.ROW_VANDALISM:

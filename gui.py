@@ -29,7 +29,7 @@ def main():
     
     initial_window.project_selected.connect(handle_project_selection)
     
-    # Show initial window
+    # Show initial window   
     initial_window.show()
     
     app.exec_()
