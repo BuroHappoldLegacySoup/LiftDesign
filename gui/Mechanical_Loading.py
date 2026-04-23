@@ -18,6 +18,7 @@ from PyQt5.QtGui import QDoubleValidator, QShowEvent
 import os
 import sys
 
+from .override_combobox import OverrideComboBox
 from .project_lift_schema import ensure_lift_section_slots, merged_lift_at
 
 try:
@@ -282,8 +283,7 @@ class ForceSpecPage(QWidget):
 
         for row in range(self.force_table.rowCount()):
             if row == self.ROW_RAIL_CAR:
-                widget = QComboBox()
-                widget.setEditable(False)
+                widget = OverrideComboBox()
                 widget.setInsertPolicy(QComboBox.NoInsert)
                 widget.addItems(["14", "18"])
                 if lift is not None:
@@ -293,8 +293,7 @@ class ForceSpecPage(QWidget):
                         if i >= 0:
                             widget.setCurrentIndex(i)
             elif row == self.ROW_RAIL_CWT:
-                widget = QComboBox()
-                widget.setEditable(False)
+                widget = OverrideComboBox()
                 widget.setInsertPolicy(QComboBox.NoInsert)
                 widget.addItems(["4", "14", "18"])
                 if lift is not None:
@@ -331,6 +330,9 @@ class ForceSpecPage(QWidget):
                 widget = QLineEdit()
                 widget.setReadOnly(True)
                 widget.setPlaceholderText("—")
+
+            if isinstance(widget, OverrideComboBox):
+                widget.set_override_context(self.FORCES_ROWS[row][1], col_position - 2)
 
             self.force_table.setCellWidget(row, col_position, widget)
 

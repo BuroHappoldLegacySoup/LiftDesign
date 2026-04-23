@@ -5,6 +5,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import pyqtSignal, Qt
 import sys
 
+from .override_combobox import OverrideComboBox
+
 
 class ApplicableCodesPage(QWidget):
     next_clicked = pyqtSignal(dict)
@@ -125,11 +127,9 @@ class ApplicableCodesPage(QWidget):
         return w
 
     def _make_combo(self, items: list[str]) -> QComboBox:
-        cb = QComboBox()
-        cb.setEditable(False)
+        cb = OverrideComboBox()
         cb.setInsertPolicy(QComboBox.NoInsert)
-        for t in items:
-            cb.addItem(t)
+        cb.addItems(list(items))
         return cb
 
     def initialize_lift_columns(self):
@@ -143,17 +143,24 @@ class ApplicableCodesPage(QWidget):
             col_position, QTableWidgetItem(f'Lift {col_position - 1}')
         )
 
+        row_label_item = self.codes_table.item
         for row in range(self.codes_table.rowCount()):
+            combo: OverrideComboBox | None = None
             if row == self.ROW_VANDALISM:
-                w = self._wrap_centered(self._make_combo(['0', '1', '2', '3']))
+                combo = self._make_combo(['0', '1', '2', '3'])
+                w = self._wrap_centered(combo)
             elif row == self.ROW_EVACUATION_TYPE:
-                w = self._wrap_centered(self._make_combo(['no', 'yes, TYPE A', 'yes, TYPE B']))
+                combo = self._make_combo(['no', 'yes, TYPE A', 'yes, TYPE B'])
+                w = self._wrap_centered(combo)
             elif row == self.ROW_EVACUATION_FUNCTIONS:
-                w = self._wrap_centered(self._make_combo(['Automatic', 'Remote', 'Assisted']))
+                combo = self._make_combo(['Automatic', 'Remote', 'Assisted'])
+                w = self._wrap_centered(combo)
             elif row == self.ROW_SEISMIC:
-                w = self._wrap_centered(self._make_combo(['0', '1', '2', '3']))
+                combo = self._make_combo(['0', '1', '2', '3'])
+                w = self._wrap_centered(combo)
             elif row == self.ROW_GREEN_BUILDING:
-                w = self._wrap_centered(self._make_combo(['BREEAM', 'LEED', 'DGNB', 'NABERS']))
+                combo = self._make_combo(['BREEAM', 'LEED', 'DGNB', 'NABERS'])
+                w = self._wrap_centered(combo)
             elif row == self.ROW_FIRE_RATING_CLASS:
                 w = self._wrap_centered(QLineEdit())
             elif row in self._CHECKBOX_ROWS:
@@ -162,6 +169,10 @@ class ApplicableCodesPage(QWidget):
                 w = self._wrap_centered(checkbox)
             else:
                 w = self._wrap_centered(QCheckBox())
+            if combo is not None:
+                label_item = row_label_item(row, 0)
+                label = label_item.text() if label_item is not None else ""
+                combo.set_override_context(label, col_position - 2)
             self.codes_table.setCellWidget(row, col_position, w)
 
     @staticmethod

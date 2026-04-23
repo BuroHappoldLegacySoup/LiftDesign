@@ -219,6 +219,42 @@ class CostPage(QWidget):
 
         self.sync_cost_to_user_inputs()
 
+        try:
+            from lift_designer_schedules_export import (
+                TEMPLATE_MAX_LIFTS,
+                TEMPLATE_REVISION_MAX_ROWS,
+                write_schedule_workbook_from_template,
+            )
+        except ImportError as e:
+            QMessageBox.critical(
+                self,
+                "VT Schedules export",
+                f"Could not load schedules export module (is openpyxl installed?).\n{e}",
+            )
+            return
+
+        overrides_by_lift = self._collect_schedule_overrides(main)
+
+        # Revision / title-block dialog. Cancel here aborts the whole export
+        # before we even prompt for a save path.
+        from gui.schedule_revision_dialog import ScheduleRevisionDialog
+
+        existing_revs = payload.get("ScheduleRevisions") if isinstance(payload, dict) else []
+        if not isinstance(existing_revs, list):
+            existing_revs = []
+
+        rev_dialog = ScheduleRevisionDialog(existing_revs, parent=self)
+        if rev_dialog.exec_() != rev_dialog.Accepted:
+            return
+
+        new_revision = rev_dialog.get_new_revision()
+        if new_revision is not None:
+            if not isinstance(payload.get("ScheduleRevisions"), list):
+                payload["ScheduleRevisions"] = []
+            payload["ScheduleRevisions"].append(new_revision)
+
+        revisions_to_write = list(payload.get("ScheduleRevisions") or [])
+
         start_dir = os.path.join(os.path.expanduser("~"), "Documents")
         preferred = getattr(main, "project_file_path", None) if main is not None else None
         if preferred and str(preferred).strip():
@@ -232,30 +268,90 @@ class CostPage(QWidget):
             "Excel workbook (*.xlsx)",
         )
         if not path:
+            # If the user cancels after already committing a new revision to the
+            # payload, roll it back so the project isn't dirtied by an aborted export.
+            if new_revision is not None and payload.get("ScheduleRevisions"):
+                payload["ScheduleRevisions"].pop()
             return
         if not path.lower().endswith(".xlsx"):
             path += ".xlsx"
 
         try:
-            from lift_designer_schedules_export import (
-                build_schedule_rows_per_lift,
-                write_schedule_workbook_multi,
-            )
-        except ImportError as e:
-            QMessageBox.critical(
-                self,
-                "VT Schedules export",
-                f"Could not load schedules export module (is openpyxl installed?).\n{e}",
-            )
-            return
-
-        try:
             normalize_project_lift_data(payload)
-            rows_by_lift = build_schedule_rows_per_lift(payload, self.number_of_lifts)
-            write_schedule_workbook_multi(path, rows_by_lift)
-            QMessageBox.information(self, "VT Schedules export", f"Saved:\n{path}")
+            written = write_schedule_workbook_from_template(
+                path,
+                payload,
+                self.number_of_lifts,
+                revisions=revisions_to_write or None,
+                overrides=overrides_by_lift or None,
+            )
+            msg_extras = []
+            if self.number_of_lifts > TEMPLATE_MAX_LIFTS:
+                msg_extras.append(
+                    f"Note: the template supports {TEMPLATE_MAX_LIFTS} lifts; "
+                    f"only the first {written} of {self.number_of_lifts} lifts "
+                    "were written."
+                )
+            if len(revisions_to_write) > TEMPLATE_REVISION_MAX_ROWS:
+                dropped = len(revisions_to_write) - TEMPLATE_REVISION_MAX_ROWS
+                msg_extras.append(
+                    f"Note: the title block holds {TEMPLATE_REVISION_MAX_ROWS} "
+                    f"revisions; the {dropped} oldest entries were omitted."
+                )
+            if msg_extras:
+                QMessageBox.information(
+                    self,
+                    "VT Schedules export",
+                    f"Saved:\n{path}\n\n" + "\n\n".join(msg_extras),
+                )
+            else:
+                QMessageBox.information(
+                    self, "VT Schedules export", f"Saved:\n{path}"
+                )
+        except FileNotFoundError as e:
+            QMessageBox.critical(self, "VT Schedules export", f"Export failed:\n{e}")
         except Exception as e:
             QMessageBox.critical(self, "VT Schedules export", f"Export failed:\n{e}")
+
+    def _collect_schedule_overrides(self, main_window) -> dict:
+        """
+        Walk every :class:`OverrideComboBox` under the app and build
+        ``{lift_index: [schedule_label, ...]}`` for the ones that are currently
+        holding a non-standard value. Labels are passed through as-is; the
+        writer normalizes them before matching to template column A.
+
+        ``main_window`` is the application root. We prefer scanning from there
+        so every page's combos are covered even when only the cost page is
+        visible.
+        """
+        try:
+            from gui.override_combobox import OverrideComboBox
+        except ImportError:
+            return {}
+
+        root = main_window if main_window is not None else self.window()
+        if root is None:
+            return {}
+
+        result: dict = {}
+        try:
+            combos = root.findChildren(OverrideComboBox)
+        except Exception:
+            combos = []
+        for combo in combos:
+            try:
+                if not combo.is_override:
+                    continue
+                label = (combo.override_label or "").strip()
+                idx = int(combo.override_lift_index)
+            except Exception:
+                continue
+            if not label or idx < 0:
+                continue
+            labels = result.setdefault(idx, [])
+            if label not in labels:
+                labels.append(label)
+        return result
 
     def _main_window_for_save(self):
         """Resolve the app main window so pre-save flush runs (parent chain, ``window()``, top-level scan)."""

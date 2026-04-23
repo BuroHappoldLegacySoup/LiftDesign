@@ -25,10 +25,23 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+
+
+# Yellow/amber fill used to highlight cells whose value came from a non-standard
+# dropdown override. Matches the UI highlight on :class:`OverrideComboBox`.
+OVERRIDE_HIGHLIGHT_HEX: str = "FFFFF2CC"  # ARGB: FF + FFF2CC
+
+
+def _normalize_override_label(label: Any) -> str:
+    """Normalization shared by the UI and writer so overrides can be matched."""
+    if label is None:
+        return ""
+    return " ".join(str(label).split()).lower()
 
 from lift_designer_ld_export import (
     _ExportCtx,
+    _coerce_cell_value,
     _compliance,
     _cost,
     _drive,
@@ -51,6 +64,20 @@ __all__ = [
     "matrix_for_schedule_workbook_multi",
     "write_schedule_workbook_multi",
     "default_schedule_filename",
+    "default_schedule_template_path",
+    "write_schedule_workbook_from_template",
+    "TEMPLATE_SHEET_NAME",
+    "TEMPLATE_LIFT_HEADER_ROW",
+    "TEMPLATE_FIRST_LIFT_COL",
+    "TEMPLATE_LIFT_COL_STRIDE",
+    "TEMPLATE_MAX_LIFTS",
+    "TEMPLATE_REVISION_FIRST_ROW",
+    "TEMPLATE_REVISION_MAX_ROWS",
+    "TEMPLATE_REVISION_COLUMNS",
+    "REVISION_FIELDS",
+    "suggest_next_revision_code",
+    "OVERRIDE_HIGHLIGHT_HEX",
+    "_normalize_override_label",
 ]
 
 
@@ -440,3 +467,260 @@ def default_schedule_filename(payload: Mapping[str, Any]) -> str:
     if isinstance(fn, str) and fn.strip():
         base = os.path.splitext(fn.strip())[0] or base
     return f"{base}_Schedules.xlsx"
+
+
+# ---------------------------------------------------------------------------
+# Template-based export
+#
+# The project ships with a VT Schedules template workbook that defines the
+# canonical layout for the schedules export (column A = parameter name in
+# English, column D = German translation, column F = unit, row 8 = lift
+# number header). The export fills one column per lift with values resolved
+# through the same :func:`_value_for_param` pipeline the LD export uses, so
+# UI inputs win over formula-derived fallbacks.
+# ---------------------------------------------------------------------------
+
+TEMPLATE_SHEET_NAME: str = "VT General Schedules"
+TEMPLATE_LIFT_HEADER_ROW: int = 8           # Row whose column A is "Lift Number".
+TEMPLATE_PARAM_FIRST_ROW: int = 9           # First parameter row below the header.
+TEMPLATE_FIRST_LIFT_COL: int = 8            # Column H → lift 1.
+TEMPLATE_LIFT_COL_STRIDE: int = 4           # H, L, P, T, X, AB, AF, AJ.
+TEMPLATE_MAX_LIFTS: int = 8                 # Template has 8 pre-laid-out lift columns.
+
+# --- Revision title block layout -----------------------------------------
+# Row 1 is the header (Revision / Issue Purpose / Date / Design Eng. / Checked);
+# rows 2..6 hold one revision each (row 7 is a spacer, row 8 is already the
+# "Lift Number" header). Each field spans a merged 3-cell block in its row —
+# writes only need to target the top-left cell of each merged range.
+TEMPLATE_REVISION_FIRST_ROW: int = 2
+TEMPLATE_REVISION_MAX_ROWS: int = 5         # Rows 2..6 inclusive.
+TEMPLATE_REVISION_COLUMNS: Dict[str, int] = {
+    "revision": 12,        # L
+    "issue_purpose": 16,   # P
+    "date": 20,            # T
+    "design_eng": 24,      # X
+    "checked": 28,         # AB
+}
+REVISION_FIELDS: Tuple[str, ...] = (
+    "revision",
+    "issue_purpose",
+    "date",
+    "design_eng",
+    "checked",
+)
+
+# Candidate template filenames, searched in the repo root in the order listed.
+# The first name is the canonical one for future-proofing; the second matches
+# the file as currently uploaded to the project.
+_TEMPLATE_FILENAMES: Tuple[str, ...] = (
+    "VT Schedules template.xlsx",
+    "xxxxxxx_template_VT Schedules V3.0_de_en.xlsx",
+)
+
+
+def default_schedule_template_path() -> str:
+    """
+    Return the absolute path to the VT Schedules template workbook that ships
+    next to this module. Raises :class:`FileNotFoundError` if none of the known
+    template filenames can be located.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    for name in _TEMPLATE_FILENAMES:
+        p = os.path.join(base_dir, name)
+        if os.path.isfile(p):
+            return p
+    # Last-resort: any ``*template*VT*Schedules*.xlsx`` in the same folder.
+    try:
+        for fn in os.listdir(base_dir):
+            lo = fn.lower()
+            if (
+                lo.endswith(".xlsx")
+                and "template" in lo
+                and "vt" in lo
+                and "schedule" in lo
+            ):
+                return os.path.join(base_dir, fn)
+    except OSError:
+        pass
+    raise FileNotFoundError(
+        "VT Schedules template workbook not found. Expected one of: "
+        + ", ".join(_TEMPLATE_FILENAMES)
+        + f"  (looked in: {base_dir})"
+    )
+
+
+def _lift_column_index(lift_number: int) -> int:
+    """
+    Return the 1-based Excel column for the given 1-based lift number in the
+    template layout (lift 1 → H, lift 2 → L, …).
+    """
+    if lift_number < 1:
+        raise ValueError("lift_number is 1-based and must be >= 1")
+    return TEMPLATE_FIRST_LIFT_COL + TEMPLATE_LIFT_COL_STRIDE * (lift_number - 1)
+
+
+def suggest_next_revision_code(existing: Sequence[Mapping[str, Any]]) -> str:
+    """
+    Given the current list of stored schedule revisions, suggest the next code.
+
+    If the most recent entry uses the ``Pnn`` pattern (``P01`` … ``P99``), the
+    next integer is returned zero-padded. Otherwise we fall back to ``P<count+1>``
+    with a leading zero so the very first export defaults to ``P01``.
+    """
+    n = len(existing)
+    last = str(existing[-1].get("revision", "")).strip() if n else ""
+    m = re.match(r"^[Pp](\d{1,3})$", last)
+    if m:
+        return f"P{int(m.group(1)) + 1:02d}"
+    return f"P{n + 1:02d}"
+
+
+def _clear_revision_block(ws) -> None:
+    """
+    Wipe every data cell (rows ``TEMPLATE_REVISION_FIRST_ROW`` …
+    ``TEMPLATE_REVISION_FIRST_ROW + TEMPLATE_REVISION_MAX_ROWS - 1``) across the
+    five revision columns so no template placeholder survives under a fresh list.
+    """
+    first = TEMPLATE_REVISION_FIRST_ROW
+    last = first + TEMPLATE_REVISION_MAX_ROWS - 1
+    for r in range(first, last + 1):
+        for col in TEMPLATE_REVISION_COLUMNS.values():
+            ws.cell(r, col).value = None
+
+
+def _write_revision_block(ws, revisions: Sequence[Mapping[str, Any]]) -> int:
+    """
+    Write up to :data:`TEMPLATE_REVISION_MAX_ROWS` revisions into the title
+    block (row 2 = first / oldest, next row = next revision, …). Returns the
+    number of revisions actually written. Any extras beyond the template's
+    capacity are silently dropped from the *front* of the list so the most
+    recent entries always make it into the workbook.
+    """
+    if not revisions:
+        return 0
+
+    trimmed = list(revisions)[-TEMPLATE_REVISION_MAX_ROWS:]
+    _clear_revision_block(ws)
+
+    first = TEMPLATE_REVISION_FIRST_ROW
+    cols = TEMPLATE_REVISION_COLUMNS
+    for idx, rev in enumerate(trimmed):
+        row = first + idx
+        for key, col in cols.items():
+            val = rev.get(key, "")
+            if val in (None, ""):
+                continue
+            ws.cell(row, col).value = _coerce_cell_value(val)
+    return len(trimmed)
+
+
+def _build_ctx(user_inputs: Mapping[str, Any], lift_index: int) -> _ExportCtx:
+    """Assemble the per-lift resolver context used by :func:`_value_for_param`."""
+    return _ExportCtx(
+        user_inputs=user_inputs,
+        lift_index=lift_index,
+        lift=_lift(user_inputs, lift_index),
+        forces=_forces(user_inputs, lift_index),
+        drive=_drive(user_inputs, lift_index),
+        compliance=_compliance(user_inputs, lift_index),
+        emergency=_emergency(user_inputs, lift_index),
+        cost=_cost(user_inputs, lift_index),
+        derived=compute_derived(user_inputs, lift_index),
+    )
+
+
+def write_schedule_workbook_from_template(
+    output_path: str,
+    user_inputs: Mapping[str, Any],
+    num_lifts: int,
+    template_path: Optional[str] = None,
+    revisions: Optional[Sequence[Mapping[str, Any]]] = None,
+    overrides: Optional[Mapping[int, Sequence[str]]] = None,
+) -> int:
+    """
+    Fill the VT Schedules template with values resolved from ``user_inputs`` and
+    save to ``output_path``. Returns the number of lifts actually written.
+
+    Behaviour:
+
+    - Loads ``template_path`` (defaults to :func:`default_schedule_template_path`)
+      so the template's styling, merged cells, German translations and units are
+      preserved.
+    - For each 1-based lift ``N`` (up to :data:`TEMPLATE_MAX_LIFTS`), walks
+      column A from row :data:`TEMPLATE_PARAM_FIRST_ROW` to the sheet's last row
+      and, for every non-empty label, writes ``_value_for_param(label, ctx)``
+      into the cell at column ``4N + 4``.
+    - Empty resolver results leave the template cell untouched (so any pre-filled
+      defaults in the template survive).
+    - Values are coerced via :func:`_coerce_cell_value` so numeric strings render
+      as numbers in Excel.
+    - When ``revisions`` is a non-empty sequence, the revision title block is
+      cleared and the entries are written top-down from
+      :data:`TEMPLATE_REVISION_FIRST_ROW` (one revision per row). Pass ``None``
+      or ``[]`` to leave the template's built-in title block untouched.
+
+    Projects with more than :data:`TEMPLATE_MAX_LIFTS` lifts still export — only
+    the first eight are written and the return value reflects that. The caller is
+    responsible for surfacing that truncation to the user.
+    """
+    try:
+        from openpyxl import load_workbook
+        from openpyxl.styles import PatternFill
+    except ImportError as e:
+        raise ImportError("pip install openpyxl") from e
+
+    src = template_path or default_schedule_template_path()
+    wb = load_workbook(src)
+    if TEMPLATE_SHEET_NAME in wb.sheetnames:
+        ws = wb[TEMPLATE_SHEET_NAME]
+    else:
+        ws = wb.active
+
+    if revisions:
+        _write_revision_block(ws, revisions)
+
+    override_fill = PatternFill(
+        start_color=OVERRIDE_HIGHLIGHT_HEX,
+        end_color=OVERRIDE_HIGHLIGHT_HEX,
+        fill_type="solid",
+    )
+    normalized_overrides: Dict[int, Set[str]] = {}
+    if overrides:
+        for lift_idx, labels in overrides.items():
+            try:
+                key = int(lift_idx)
+            except (TypeError, ValueError):
+                continue
+            norm_labels = {
+                _normalize_override_label(lbl) for lbl in (labels or ()) if lbl
+            }
+            norm_labels.discard("")
+            if norm_labels:
+                normalized_overrides[key] = norm_labels
+
+    lifts_to_write = max(0, min(int(num_lifts), TEMPLATE_MAX_LIFTS))
+    last_row = ws.max_row
+
+    for n in range(1, lifts_to_write + 1):
+        lift_index = n - 1
+        ctx = _build_ctx(user_inputs, lift_index)
+        target_col = _lift_column_index(n)
+        lift_overrides = normalized_overrides.get(lift_index, set())
+
+        for r in range(TEMPLATE_PARAM_FIRST_ROW, last_row + 1):
+            label_cell = ws.cell(r, 1).value
+            if label_cell is None:
+                continue
+            label = str(label_cell).strip()
+            if not label:
+                continue
+            value = _value_for_param(label, ctx)
+            if value in (None, ""):
+                continue
+            cell = ws.cell(r, target_col)
+            cell.value = _coerce_cell_value(value)
+            if lift_overrides and _normalize_override_label(label) in lift_overrides:
+                cell.fill = override_fill
+
+    wb.save(output_path)
+    return lifts_to_write

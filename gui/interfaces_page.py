@@ -6,6 +6,7 @@ from PyQt5.QtGui import QDoubleValidator
 from PyQt5.QtCore import pyqtSignal, Qt
 import sys
 
+from .override_combobox import OverrideComboBox
 from .project_lift_schema import LEGACY_EMERGENCY_KEY_TO_CANONICAL
 
 
@@ -68,12 +69,10 @@ class InterfacesPage(QWidget):
 
     @staticmethod
     def _choice_combo(items: tuple[str, ...]) -> QComboBox:
-        w = QComboBox()
-        w.setEditable(False)
+        w = OverrideComboBox()
         w.setInsertPolicy(QComboBox.NoInsert)
-        w.setStyleSheet("QComboBox { combobox-popup: 0; }")
-        for t in items:
-            w.addItem(t)
+        w.set_base_style_sheet("QComboBox { combobox-popup: 0; }")
+        w.addItems(list(items))
         return w
 
     def initUI(self):
@@ -149,8 +148,10 @@ class InterfacesPage(QWidget):
         for row in range(self.interfaces_table.rowCount()):
             if row in self._ROW_COMBO_YES_NO:
                 w = self._choice_combo(self._YES_NO_ITEMS)
+                w.set_override_context(self.EMERGENCY_ROWS[row][1], col_position - 2)
             elif row in self._ROW_COMBO_POWER_TYPE:
                 w = self._choice_combo(self._POWER_TYPE_ITEMS)
+                w.set_override_context(self.EMERGENCY_ROWS[row][1], col_position - 2)
             elif row in self._ROW_LINE_EDIT:
                 w = QLineEdit()
                 if row in self._ROW_LINE_EDIT_NUMERIC:

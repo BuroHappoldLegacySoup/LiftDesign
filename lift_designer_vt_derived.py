@@ -98,19 +98,6 @@ def _forces(ui: Mapping[str, Any], i: int) -> Dict[str, Any]:
     return dict(rows[i]) if 0 <= i < len(rows) and isinstance(rows[i], dict) else {}
 
 
-# --- VT R280/R288 — rear door mirror logic ----------------------------------
-
-def _rear_door_mirror(front: str) -> str:
-    f = _s(front)
-    if f == "2L":
-        return "2R"
-    if f == "2R":
-        return "2L"
-    if f in ("2C", "4C", "6C"):
-        return f
-    return ""
-
-
 # --- VT R292 / R293 — shaft wall-distance lookup ----------------------------
 # Encoded as a shared table: each row matches (cabin_width, door_width, {door_types}).
 # ``access_restrict``: ``None`` = any accessibility; ``"yes"`` / ``"no"`` = restricted.
@@ -365,14 +352,13 @@ def compute_derived(user_inputs: Mapping[str, Any], lift_index: int) -> Dict[str
     if cw_mm is not None and dw_mm is not None:
         out["third cop length"] = _fmt_dim((cw_mm - dw_mm) / 4.0)
 
-    # -------- R278/R286 Front entrance = door type; R280/R288 Rear = mirror
-    if door_type_used:
-        out["front entrance"] = door_type_used
-        out["front car doors"] = door_type_used
-        rear = _rear_door_mirror(door_type_used)
-        if rear:
-            out["rear entrance"] = rear
-            out["rear car doors"] = rear
+    # -------- R279/R281 Shaft doors, R287/R289 Cabin doors
+    # These VT rows use an XLOOKUP in the 'selection' sheet to return a LiftDesigner
+    # product ID (e.g. 1400086) based on door component maker ("Common component" /
+    # "Meiller"), door type code, and door width. The door component maker is not yet
+    # captured in the UI, so we leave the cells empty until that input is added and
+    # the selection-sheet tables are ported. Writing the door-type code here would be
+    # wrong (the VT formula returns an LD product ID, not the code).
 
     # -------- R292 wall-distance CWT side
     wall_cwt = _lookup_wall_distance(

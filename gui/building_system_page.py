@@ -5,6 +5,8 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator
 import sys
 
+from .override_combobox import OverrideComboBox
+
 class BuildingSystemPage(QWidget):
     next_clicked = pyqtSignal(dict)
 
@@ -116,8 +118,11 @@ class BuildingSystemPage(QWidget):
                 widget = QLineEdit()
                 widget.setValidator(QDoubleValidator())
             elif row == 9:
-                widget = QComboBox()
+                widget = OverrideComboBox()
                 widget.addItems(['BS EN81'])
+                label_item = self.system_table.item(row, 0)
+                if label_item is not None:
+                    widget.set_override_context(label_item.text(), col_position - 1)
             else:
                 widget = QLineEdit()
             self.system_table.setCellWidget(row, col_position, widget)

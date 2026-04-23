@@ -12,6 +12,7 @@ from PyQt5.QtGui import QDoubleValidator, QShowEvent
 import os
 import sys
 
+from .override_combobox import OverrideComboBox
 from .project_lift_schema import merged_lift_at, normalize_project_lift_data
 
 try:
@@ -101,9 +102,8 @@ class LiftDriveControlPage(QWidget):
 
     @staticmethod
     def _choice_combo(labels: list[str]) -> QComboBox:
-        """Non-editable dropdown with only real choices (no blank row / no user-typed entries)."""
-        w = QComboBox()
-        w.setEditable(False)
+        """Editable override-aware dropdown with the given standard options."""
+        w = OverrideComboBox()
         w.setInsertPolicy(QComboBox.NoInsert)
         w.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         for t in labels:
@@ -113,7 +113,7 @@ class LiftDriveControlPage(QWidget):
         if w.count() > 0:
             w.setCurrentIndex(0)
         # Avoid an extra empty-looking line in the popup when the combo sits in a QTableWidget.
-        w.setStyleSheet("QComboBox { combobox-popup: 0; }")
+        w.set_base_style_sheet("QComboBox { combobox-popup: 0; }")
         return w
 
     def initUI(self):
@@ -245,6 +245,10 @@ class LiftDriveControlPage(QWidget):
                     widget.textChanged.connect(lambda *_a, cp=col_position: self._apply_computed_for_column(cp))
             else:
                 widget = QLineEdit()
+
+            if isinstance(widget, OverrideComboBox):
+                widget.set_override_context(self.LIFT_DRIVE_ROWS[row][1], col_position - 2)
+
             self.system_table.setCellWidget(row, col_position, widget)
 
         self._apply_defaults_for_column(col_position, overwrite_empty_only=False)

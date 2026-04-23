@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator
 
+from .override_combobox import OverrideComboBox
 from .lift_types import LOAD_CAPACITY_KG, LiftSystemType, permissible_persons_for_capacity
 from .project_lift_schema import (
     KEY_GENERAL_SPECIFICATION,
@@ -389,38 +390,41 @@ class GeneralSpecificationPage(QWidget):
 
         for row in range(self.system_table.rowCount()):
             if row == 0:
-                widget = QComboBox()
+                widget = OverrideComboBox()
                 widget.addItems(list(LiftSystemType.ALL))
             elif row == 1:
-                widget = QComboBox()
+                widget = OverrideComboBox()
                 widget.addItems(['Traction - MR', 'Traction - MRL', 'Hydraulic - MR', 'Hydraulic - MRL'])
             elif row == 2:
-                widget = QComboBox()
+                widget = OverrideComboBox()
                 widget.addItems(['BS EN81'])
             elif row == 3:
-                widget = QComboBox()
+                widget = OverrideComboBox()
                 widget.addItems(['Simplex', 'Duplex', 'Triplex', 'Quadplex'])
             elif row == 4:
-                widget = QComboBox()
+                widget = OverrideComboBox()
                 widget.addItems(['CWT-Left', 'CWT-Right', 'CWT-Rear', 'no CWT'])
             elif row == 5:
-                widget = QComboBox()
+                widget = OverrideComboBox()
                 widget.addItems([str(x) for x in LOAD_CAPACITY_KG])
                 widget.currentTextChanged.connect(
                     lambda text, c=col_position: self._apply_persons_for_load_column(c, text)
                 )
             elif row == 7:
-                widget = QComboBox()
+                widget = OverrideComboBox()
                 widget.addItems(['1,00', '1,60', '2,00'])
             elif row == 14:
-                widget = QComboBox()
+                widget = OverrideComboBox()
                 widget.addItems(['Front', 'Rear', 'Front + Rear', 'Front + Side', 'Front + Side + Rear'])
             elif row == 15:
-                widget = QComboBox()
+                widget = OverrideComboBox()
                 widget.addItems(['yes', 'no'])
             else:
                 widget = QLineEdit()
                 widget.setValidator(_general_spec_double_validator())
+
+            if isinstance(widget, OverrideComboBox):
+                widget.set_override_context(GENERAL_SPEC_ROWS[row][1], col_position - 2)
 
             self.system_table.setCellWidget(row, col_position, widget)
             self._connect_cell_widget_sync(widget)

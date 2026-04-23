@@ -64,7 +64,7 @@ class LDExportRow:
 class VTExportRule:
     """One logical rule from the VT sheet (row order preserved)."""
 
-    kind: str  # "static" | "floors_z" | "floors_desc" | "info"
+    kind: str  # "static" | "floors_z" | "floors_desc"
     varnames: List[str] = field(default_factory=list)
     param_label: str = ""
     vt_row: int = 0
@@ -209,12 +209,11 @@ def load_vt_export_rules(
         if fcell is None or str(fcell).strip() == "":
             continue
         fs = str(fcell).strip()
-        # VT rows marked as informational (column F = "yes, info") still need to appear
-        # in the LD export so UI-entered values are visible, even though they don't map
-        # to a DTV varname. Emit them as an "info" rule that is rendered with only the
-        # description + value populated (no A/C/D), similar to a section row.
+        # Only rows whose column F resolves to an explicit DTV path are exported.
+        # ``no`` / ``-`` / ``yes`` / ``yes, info`` (and any other free-text marker
+        # without an LD variable) are dropped entirely: they must never produce a
+        # row in the LD export workbook, even as a description-only placeholder.
         if fs.lower() in ("yes, info", "yes,info"):
-            rules.append(VTExportRule("info", [], plab, r))
             continue
         if _is_no_export(fs):
             continue
@@ -222,14 +221,9 @@ def load_vt_export_rules(
             continue
         lines = _parse_ld_path_lines(fs)
         if not lines:
-            # No LD path but something is present in column F (e.g. a bare "yes").
-            # Treat it as informational so the value still shows up in the export.
-            rules.append(VTExportRule("info", [], plab, r))
             continue
-        # Multiline: split LD paths vs noise
         paths = [ln.strip() for ln in lines if _looks_like_ld_path(ln.strip())]
         if not paths:
-            rules.append(VTExportRule("info", [], plab, r))
             continue
         if any(re.match(r"^FLL\.Level\d+\.Z_POT$", x) for x in paths):
             if not seen_z:
@@ -828,13 +822,6 @@ def build_ld_rows_from_user_inputs(
             continue
 
         val = _value_for_param(rule.param_label, ctx)
-        if rule.kind == "info":
-            # Informational parameter (VT column F = "yes, info"): no DTV varname,
-            # but the value should still appear next to its label so UI-entered data
-            # is never silently dropped from the LD export.
-            if val:
-                rows.append(LDExportRow("", val, rule.param_label, vt_row=rule.vt_row))
-            continue
 
         for vn in rule.varnames:
             tv = remap_varname_for_lift(vn, rule.param_label, ctx.lift_index)

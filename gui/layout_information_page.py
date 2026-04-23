@@ -11,6 +11,7 @@ from PyQt5.QtGui import QDoubleValidator, QShowEvent
 import os
 import sys
 
+from .override_combobox import OverrideComboBox
 from .project_lift_schema import (
     KEY_LAYOUT_INFORMATION,
     merged_lift_at,
@@ -450,7 +451,7 @@ class LayoutInformationPage(QWidget):
 
         for row in range(self.layout_table.rowCount()):
             if row == self.ROW_CABIN_TYPE:
-                w = QComboBox()
+                w = OverrideComboBox()
                 w.addItems(['Deep', 'Wide'])
                 w.currentTextChanged.connect(lambda *_a, cp=col_position: self._apply_cabin_width_for_column(cp))
                 widget = w
@@ -500,12 +501,16 @@ class LayoutInformationPage(QWidget):
             ):
                 widget = QLineEdit()
             elif row in self._COMBO_OPTIONS:
-                w = QComboBox()
+                w = OverrideComboBox()
                 w.addItems(self._COMBO_OPTIONS[row])
                 widget = w
             else:
                 widget = QLineEdit()
                 widget.setValidator(QDoubleValidator())
+
+            if isinstance(widget, OverrideComboBox):
+                widget.set_override_context(self.LAYOUT_ROWS[row][1], col_position - 2)
+
             self.layout_table.setCellWidget(row, col_position, widget)
 
         self._apply_cabin_width_for_column(col_position)
