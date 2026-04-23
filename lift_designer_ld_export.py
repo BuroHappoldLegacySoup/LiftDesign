@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple, Union
 
 from gui.project_lift_schema import merged_lift_at
+from lift_designer_vt_derived import compute_derived
 
 __all__ = [
     "LDExportRow",
@@ -53,13 +54,17 @@ class LDExportRow:
     varname: str
     value: str = ""
     description: str = ""
+    # Source VT row this export row was produced from. Used by
+    # :func:`matrix_for_ld_workbook` to anchor bold section-header rows at the correct
+    # position. ``0`` means "unknown" and is treated as *before any VT row*.
+    vt_row: int = 0
 
 
 @dataclass
 class VTExportRule:
     """One logical rule from the VT sheet (row order preserved)."""
 
-    kind: str  # "static" | "floors_z" | "floors_desc"
+    kind: str  # "static" | "floors_z" | "floors_desc" | "info"
     varnames: List[str] = field(default_factory=list)
     param_label: str = ""
     vt_row: int = 0
@@ -204,7 +209,12 @@ def load_vt_export_rules(
         if fcell is None or str(fcell).strip() == "":
             continue
         fs = str(fcell).strip()
+        # VT rows marked as informational (column F = "yes, info") still need to appear
+        # in the LD export so UI-entered values are visible, even though they don't map
+        # to a DTV varname. Emit them as an "info" rule that is rendered with only the
+        # description + value populated (no A/C/D), similar to a section row.
         if fs.lower() in ("yes, info", "yes,info"):
+            rules.append(VTExportRule("info", [], plab, r))
             continue
         if _is_no_export(fs):
             continue
@@ -212,10 +222,14 @@ def load_vt_export_rules(
             continue
         lines = _parse_ld_path_lines(fs)
         if not lines:
+            # No LD path but something is present in column F (e.g. a bare "yes").
+            # Treat it as informational so the value still shows up in the export.
+            rules.append(VTExportRule("info", [], plab, r))
             continue
         # Multiline: split LD paths vs noise
         paths = [ln.strip() for ln in lines if _looks_like_ld_path(ln.strip())]
         if not paths:
+            rules.append(VTExportRule("info", [], plab, r))
             continue
         if any(re.match(r"^FLL\.Level\d+\.Z_POT$", x) for x in paths):
             if not seen_z:
@@ -243,6 +257,9 @@ class _ExportCtx:
     compliance: Dict[str, Any]
     emergency: Dict[str, Any]
     cost: Dict[str, Any]
+    # VT-formula derived values keyed by normalized parameter label (lowercase, whitespace-
+    # collapsed). Used as a fallback when the UI field is empty — see :func:`_value_for_param`.
+    derived: Dict[str, str] = field(default_factory=dict)
 
 
 def _lift(ui: Mapping[str, Any], i: int) -> Dict[str, Any]:
@@ -302,7 +319,7 @@ def _get_lift_field(lift: Dict[str, Any], *keys: str) -> str:
     return ""
 
 
-# Applicable codes page: checkbox row labels — export the label only when checked.
+# Applicable codes page: checkbox row labels — export short code names only when checked.
 _LD_COMPLIANCE_CHECKBOX_LABELS: Tuple[str, ...] = (
     "EN81-28 emergency call",
     "EN81-70 Accessibility",
@@ -311,6 +328,16 @@ _LD_COMPLIANCE_CHECKBOX_LABELS: Tuple[str, ...] = (
     "EN81-73 Fire emergency return",
     "EN81-58 Fire rated landing doors",
 )
+
+# Full UI label → standard/code token for LD export (no descriptions or "=value" suffixes).
+_LD_COMPLIANCE_CHECKBOX_LABEL_TO_CODE: Dict[str, str] = {
+    "EN81-28 emergency call": "EN81-28",
+    "EN81-70 Accessibility": "EN81-70",
+    "DIN EN17210 / 18040-1 Accessibility": "DIN EN17210 / 18040-1",
+    "EN81-72 Firefighter elevator": "EN81-72",
+    "EN81-73 Fire emergency return": "EN81-73",
+    "EN81-58 Fire rated landing doors": "EN81-58",
+}
 
 
 def _compliance_checkbox_selected(v: Any) -> bool:
@@ -323,47 +350,58 @@ def _compliance_checkbox_selected(v: Any) -> bool:
 
 def _compliance_summary(ui: Mapping[str, Any], i: int) -> str:
     """
-    Text for ``L_StandardTab.STD_DESC`` / “Applied codes”: only entries the user effectively
-    selected (checked checkboxes; combos/fields omit neutral defaults like category ``0`` or ``no``).
+    Text for ``L_StandardTab.STD_DESC`` / “Applied codes”: short standard/code names only
+    (e.g. ``EN81-70``, ``DIN EN17210 / 18040-1``, ``EN81-76``, ``BREEAM``) — no UI suffixes
+    or ``field=value`` text.
     """
     comp = ui.get("Compliance") or []
     if i >= len(comp) or not isinstance(comp[i], dict):
         return ""
     d = comp[i]
     parts: List[str] = []
+    seen: set[str] = set()
+
+    def add(token: str) -> None:
+        t = token.strip()
+        if t and t not in seen:
+            seen.add(t)
+            parts.append(t)
 
     for label in _LD_COMPLIANCE_CHECKBOX_LABELS:
         if label not in d:
             continue
         if _compliance_checkbox_selected(d[label]):
-            parts.append(label)
+            code = _LD_COMPLIANCE_CHECKBOX_LABEL_TO_CODE.get(label, label)
+            add(code)
 
     v = d.get("EN81-71 Vandalism category")
     if v is not None and str(v).strip() not in ("", "0"):
-        parts.append(f"EN81-71 Vandalism category={_s(v)}")
+        add("EN81-71")
 
+    en81_76 = False
     v = d.get("EN81-76 Emergency Evacuation type")
     if isinstance(v, str) and v.strip() and v.strip().lower() != "no":
-        parts.append(f"EN81-76 Emergency Evacuation type={v.strip()}")
-
+        en81_76 = True
     v = d.get("EN81-76 Evacuation functions")
     if v is not None and str(v).strip():
-        parts.append(f"EN81-76 Evacuation functions={_s(v)}")
+        en81_76 = True
+    if en81_76:
+        add("EN81-76")
 
     v = d.get("EN81-77 Seismic category")
     if v is not None and str(v).strip() not in ("", "0"):
-        parts.append(f"EN81-77 Seismic category={_s(v)}")
+        add("EN81-77")
 
     v = d.get("Green building certification compliance")
     if v is not None and str(v).strip():
-        parts.append(f"Green building certification compliance={_s(v)}")
+        add(_s(v))
 
     v = d.get("EN81-58 Fire rating class")
     if isinstance(v, bool):
         if v:
-            parts.append("EN81-58 Fire rating class")
+            add("EN81-58")
     elif isinstance(v, str) and v.strip():
-        parts.append(f"EN81-58 Fire rating class={v.strip()}")
+        add("EN81-58")
 
     return "; ".join(parts)
 
@@ -579,18 +617,110 @@ PARAM_RESOLVERS: Dict[str, Callable[[_ExportCtx], str]] = {
 }
 
 
+def _strip_qualifier(label: str) -> str:
+    """
+    Drop trailing parenthetical qualifiers and unit suffixes and collapse whitespace
+    around ``/`` for loose matching.
+
+    - ``"Cabin width (clear)"`` → ``"cabin width"``
+    - ``"Door width (mm)"``     → ``"door width"``
+    - ``"Accessible rooms / cwt safety"`` → ``"accessible rooms/cwt safety"``
+      so it matches the UI key ``"Accessible rooms/cwt safety"``.
+
+    Repeated parentheses are stripped until none remain so labels like
+    ``"Acceleration (m/s²) (new)"`` still normalize cleanly.
+    """
+    s = str(label).strip()
+    while True:
+        new = re.sub(r"\s*\([^)]*\)\s*$", "", s)
+        if new == s:
+            break
+        s = new
+    s = re.sub(r"\s*/\s*", "/", s)
+    return _norm_param(s)
+
+
+def _lookup_value_in_ctx_dicts(param_key: str, ctx: _ExportCtx) -> str:
+    """
+    Scan every UI-backed dict on ``ctx`` for a key that matches ``param_key`` under
+    normal or loose normalization. Returns the first non-empty match, or ``""``.
+
+    The loose form tolerates the common VT / UI mismatch where VT labels carry a
+    parenthetical qualifier (e.g. ``"Cabin width (clear)"``) while the UI stores the
+    value under the plain name (``"Cabin width"``). Exact-normalized matches are
+    preferred over loose ones so a UI that does write ``"Cabin width (clear)"`` still
+    wins over one that writes ``"Cabin width"``.
+    """
+    loose_target = _strip_qualifier(param_key)
+    dicts = (ctx.lift, ctx.forces, ctx.drive, ctx.compliance, ctx.emergency, ctx.cost)
+
+    # First pass: exact normalized match.
+    for d in dicts:
+        if not isinstance(d, Mapping):
+            continue
+        for dk, dv in d.items():
+            if not isinstance(dk, str):
+                continue
+            if _norm_param(dk) == param_key:
+                v = _s(dv)
+                if v:
+                    return v
+    # Second pass: qualifier-stripped match (both sides).
+    for d in dicts:
+        if not isinstance(d, Mapping):
+            continue
+        for dk, dv in d.items():
+            if not isinstance(dk, str):
+                continue
+            if _strip_qualifier(dk) == loose_target:
+                v = _s(dv)
+                if v:
+                    return v
+    return ""
+
+
 def _value_for_param(param_label: str, ctx: _ExportCtx) -> str:
+    """
+    Resolve a VT parameter label to an LD export value.
+
+    Order of precedence (UI always wins):
+
+    1. UI-backed resolver in :data:`PARAM_RESOLVERS`.
+    2. Exact / loose-qualifier match across every UI-backed context dict
+       (``ctx.lift``, ``ctx.forces``, ``ctx.drive``, …). This catches values the UI
+       writes under labels that differ from the VT column-A label only by a trailing
+       parenthetical qualifier — e.g. UI ``"Cabin width"`` vs VT ``"Cabin width (clear)"``.
+    3. VT-formula fallback in ``ctx.derived`` — only used when the UI has nothing to
+       contribute, so manually entered values are never overridden by a computed default.
+    """
     key = _norm_param(param_label)
+
     fn = PARAM_RESOLVERS.get(key)
     if fn:
-        return fn(ctx)
+        val = fn(ctx)
+        if val:
+            return val
+
     # Special: L_StandardTab.STD_DESC description "Applied codes"
     if "applied codes" in key:
-        return _val_std_desc(ctx)
-    # Fallback: exact key on merged lift
-    for dk, dv in ctx.lift.items():
-        if isinstance(dk, str) and _norm_param(dk) == key:
-            return _s(dv)
+        std = _val_std_desc(ctx)
+        if std:
+            return std
+
+    ui_val = _lookup_value_in_ctx_dicts(key, ctx)
+    if ui_val:
+        return ui_val
+
+    derived = ctx.derived.get(key, "")
+    if derived:
+        return derived
+    # Derived also exposes an alias under the qualifier-stripped label (see
+    # :mod:`lift_designer_vt_derived`). Try that as a last resort so e.g. a VT row
+    # labelled plainly "Cabin width" still picks up the profile's computed width.
+    derived_loose = ctx.derived.get(_strip_qualifier(key), "")
+    if derived_loose:
+        return derived_loose
+
     return ""
 
 
@@ -611,35 +741,59 @@ def _coerce_cell_value(val: str) -> Union[str, Number]:
     return val
 
 
-def _rows_for_floors_z(ctx: _ExportCtx) -> List[LDExportRow]:
+def _floor_elevation_mm(floor: Mapping[str, Any]) -> int:
+    """
+    Read the floor's absolute elevation (metres) and return it in millimetres.
+
+    Accepts the current UI key ``"Elevation (m)"`` and, for backward compatibility with
+    projects saved before the rename, falls back to the legacy ``"Height (m)"`` key.
+    Non-numeric / missing entries return ``0`` mm.
+    """
+    raw = floor.get("Elevation (m)")
+    if raw is None or str(raw).strip() == "":
+        raw = floor.get("Height (m)", 0)
+    try:
+        return int(round(float(str(raw).replace(",", ".")) * 1000.0))
+    except (ValueError, TypeError, OverflowError):
+        return 0
+
+
+def _rows_for_floors_z(ctx: _ExportCtx, vt_row: int = 0) -> List[LDExportRow]:
+    """
+    Emit ``FLL.Level{i}.Z_POT`` rows. The value is each floor's **absolute elevation**
+    (UI field *Elevation (m)*) converted to millimetres — one direct mapping per row, no
+    cumulative summing. The description carries the floor name (same text that the
+    matching ``.DESC`` row uses for its value).
+    """
     out: List[LDExportRow] = []
     floors = _floors_list(ctx.user_inputs, ctx.lift_index)
-    z_cum = 0.0
     for idx, floor in enumerate(floors):
-        try:
-            h_mm = float(str(floor.get("Height (m)", "0")).replace(",", ".")) * 1000.0
-        except (ValueError, TypeError, OverflowError):
-            h_mm = 0.0
+        z_mm = _floor_elevation_mm(floor)
         fname = _s(floor.get("Floor Name", floor.get("Floor", "")))
         label = fname if fname else f"Level {idx}"
         out.append(
             LDExportRow(
                 f"FLL.Level{idx}.Z_POT",
-                str(int(round(z_cum))),
+                str(z_mm),
                 label,
+                vt_row=vt_row,
             )
         )
-        z_cum += h_mm
     return out
 
 
-def _rows_for_floors_desc(ctx: _ExportCtx) -> List[LDExportRow]:
+def _rows_for_floors_desc(ctx: _ExportCtx, vt_row: int = 0) -> List[LDExportRow]:
+    """
+    Emit ``FLL.Level{i}.DESC`` rows. The value is the UI *Floor Name*; the description
+    falls back to the numeric *Floor* if the name is blank so the LD workbook always
+    has a readable label in column F.
+    """
     out: List[LDExportRow] = []
     floors = _floors_list(ctx.user_inputs, ctx.lift_index)
     for idx, floor in enumerate(floors):
         fn = _s(floor.get("Floor Name", ""))
         fl = _s(floor.get("Floor", ""))
-        out.append(LDExportRow(f"FLL.Level{idx}.DESC", fn, fl or fn))
+        out.append(LDExportRow(f"FLL.Level{idx}.DESC", fn, fl or fn, vt_row=vt_row))
     return out
 
 
@@ -660,22 +814,31 @@ def build_ld_rows_from_user_inputs(
         compliance=_compliance(user_inputs, lift_index),
         emergency=_emergency(user_inputs, lift_index),
         cost=_cost(user_inputs, lift_index),
+        derived=compute_derived(user_inputs, lift_index),
     )
     rules = load_vt_export_rules(vt_path)
     rows: List[LDExportRow] = []
 
     for rule in rules:
         if rule.kind == "floors_z":
-            rows.extend(_rows_for_floors_z(ctx))
+            rows.extend(_rows_for_floors_z(ctx, vt_row=rule.vt_row))
             continue
         if rule.kind == "floors_desc":
-            rows.extend(_rows_for_floors_desc(ctx))
+            rows.extend(_rows_for_floors_desc(ctx, vt_row=rule.vt_row))
             continue
 
         val = _value_for_param(rule.param_label, ctx)
+        if rule.kind == "info":
+            # Informational parameter (VT column F = "yes, info"): no DTV varname,
+            # but the value should still appear next to its label so UI-entered data
+            # is never silently dropped from the LD export.
+            if val:
+                rows.append(LDExportRow("", val, rule.param_label, vt_row=rule.vt_row))
+            continue
+
         for vn in rule.varnames:
             tv = remap_varname_for_lift(vn, rule.param_label, ctx.lift_index)
-            rows.append(LDExportRow(tv, val, rule.param_label))
+            rows.append(LDExportRow(tv, val, rule.param_label, vt_row=rule.vt_row))
 
     return rows
 
@@ -685,16 +848,45 @@ def _section_row_f(title: str) -> List[Any]:
     return [None, None, None, None, None, title, None]
 
 
-def _is_mechanical_loading_var(varname: str) -> bool:
-    vn = varname or ""
-    return bool(
-        vn
-        and (
-            "Force0.F" in vn
-            or "Buffer0.Force" in vn
-            or "UBolt.Force" in vn
-        )
-    )
+# Bold section headers emitted into column F of the LD workbook. Each entry is
+# ``(anchor_vt_row, title)`` — the header is inserted just before the first LD row whose
+# source VT row is ``>= anchor_vt_row``. Rows are matched in list order, so entries must
+# be sorted by ``anchor_vt_row``.
+#
+# The anchor row is usually the VT row of the header itself (column A), except where a
+# header must appear *between* two consecutive data rows. Example: the VT sheet has
+# "Lift Designer parameters" at R231 but "Applied codes" (a data row) at R232 — to get
+# the order *Applicable codes → Applied codes (STD_DESC) → Lift Designer parameters →
+# COP panel*, the "Lift Designer parameters" anchor is R233 (the first row after
+# STD_DESC) and "Applicable codes" anchors at R232 (right before STD_DESC).
+#
+# Parent/sub-section combinations (e.g. "Shaft depth" + "1. Open Through") are merged
+# into a single title, matching the user-facing grouping the export is expected to show.
+_LD_SECTION_HEADERS: Tuple[Tuple[int, str], ...] = (
+    (73,  "Electrical & HVAC"),
+    (90,  "Mechanical Loading"),
+    (232, "Applicable codes"),
+    (233, "Lift Designer parameters"),
+    (254, "Level name"),
+    (265, "Level name"),
+    (276, "Entrance Doors"),
+    (284, "Car doors"),
+    (291, "Lift arrangement tool"),
+    (299, "Shaft Width"),
+    (311, "Shaft depth 1. Open Through"),
+    (326, "Shaft depth 2. Front entrance"),
+    (337, "Shaft depth 3. Rear entrance"),
+    (355, "Rail Wall thickness"),
+    (361, "Door opening height"),
+    (367, "Entrance centering Front Door"),
+    (372, "Entrance centering Rear door"),
+    (380, "Front LOP"),
+    (386, "Rear LOP"),
+    (391, "LIP"),
+    (400, "Front entrance bottom rails"),
+    (405, "Front entrance top rails"),
+    (410, "Rear entrance rails"),
+)
 
 
 def _ld_workbook_preamble() -> List[List[Any]]:
@@ -724,7 +916,11 @@ def _apply_ld_mode_legend_to_rows_g234(matrix: List[List[Any]]) -> None:
         row[6] = _LD_MODE_LEGEND_G234[i]
 
 
-def matrix_for_ld_workbook(rows: Sequence[LDExportRow]) -> Tuple[List[List[Any]], List[int]]:
+def matrix_for_ld_workbook(
+    rows: Sequence[LDExportRow],
+    *,
+    with_mode_legend: bool = True,
+) -> Tuple[List[List[Any]], List[int]]:
     """
     Build a 7-column grid like the reference ``LD example data import.xlsx``:
 
@@ -732,47 +928,44 @@ def matrix_for_ld_workbook(rows: Sequence[LDExportRow]) -> Tuple[List[List[Any]]
     - Section breaks: empty row with **bold** title in column **F** only.
     - Parameter rows: A–D values, description in **F**, **G** empty.
 
+    Section headers come from :data:`_LD_SECTION_HEADERS` and are anchored to VT rows
+    carried on each :class:`LDExportRow`. A header is inserted just before the first
+    data row whose ``vt_row`` is ``>= header.anchor_vt_row``. Rows with ``vt_row == 0``
+    (legacy / synthetic) are treated as *after every anchor* so they don't trigger
+    pending headers on their own.
+
+    ``with_mode_legend`` controls whether the three mode-description lines are written
+    into **G2–G4** of this sub-matrix. Multi-lift assembly in
+    :func:`matrix_for_ld_workbook_multi` disables it per-lift and stamps the legend
+    exactly once on the final combined matrix, so the text stays in rows 1–4 and does
+    not leak onto the first data rows of subsequent shaft blocks.
+
     Returns ``(matrix, section_header_row_indices)`` (1-based row numbers for bold F cells).
     """
     matrix: List[List[Any]] = list(_ld_workbook_preamble())
     section_rows_1based: List[int] = []
-    seen_elec = False
-    seen_mech = False
-    seen_codes = False
-    seen_z = False
-    seen_desc = False
+    pending = list(_LD_SECTION_HEADERS)  # consumed in order
+    seen_titles: set = set()
+
+    def _flush_headers_up_to(target_row: int) -> None:
+        while pending and pending[0][0] <= target_row:
+            _, title = pending.pop(0)
+            # The VT sheet lists "Level name" twice (Z_POT and DESC groups). Keep both
+            # occurrences (they anchor to different VT rows) but drop accidental
+            # re-adds if the table is ever extended with real duplicates.
+            key = (title, target_row)
+            if key in seen_titles:
+                continue
+            seen_titles.add(key)
+            matrix.append(_section_row_f(title))
+            section_rows_1based.append(len(matrix))
 
     for r in rows:
         if not str(r.varname).strip() and not str(r.value).strip():
             continue
-        vn = str(r.varname).strip()
 
-        if vn.startswith("L_Projects.") and not seen_elec:
-            matrix.append(_section_row_f("Electrical & HVAC"))
-            section_rows_1based.append(len(matrix))
-            seen_elec = True
-
-        if _is_mechanical_loading_var(vn) and not seen_mech:
-            matrix.append(_section_row_f("Mechanical Loading"))
-            section_rows_1based.append(len(matrix))
-            seen_mech = True
-
-        if vn == "L_StandardTab.STD_DESC" and not seen_codes:
-            matrix.append(_section_row_f("Applicable codes"))
-            section_rows_1based.append(len(matrix))
-            matrix.append(_section_row_f("Lift Designer parameters"))
-            section_rows_1based.append(len(matrix))
-            seen_codes = True
-
-        if ".Z_POT" in vn and not seen_z:
-            matrix.append(_section_row_f("Level name"))
-            section_rows_1based.append(len(matrix))
-            seen_z = True
-
-        if ".DESC" in vn and not seen_desc:
-            matrix.append(_section_row_f("Level name"))
-            section_rows_1based.append(len(matrix))
-            seen_desc = True
+        if r.vt_row:
+            _flush_headers_up_to(r.vt_row)
 
         matrix.append(
             [
@@ -786,7 +979,8 @@ def matrix_for_ld_workbook(rows: Sequence[LDExportRow]) -> Tuple[List[List[Any]]
             ]
         )
 
-    _apply_ld_mode_legend_to_rows_g234(matrix)
+    if with_mode_legend:
+        _apply_ld_mode_legend_to_rows_g234(matrix)
     return matrix, section_rows_1based
 
 
@@ -808,6 +1002,8 @@ def matrix_for_ld_workbook_multi(
     insert a bold **Shaft *i*** row in column **F** (same style as other section titles).
 
     Each lift uses a fresh copy of the internal section headers (Electrical & HVAC, …).
+    The mode-declaration legend is applied **once** at the end (to the global rows 2–4)
+    so the three description lines never appear on the first data rows of shafts 2+.
     """
     matrix: List[List[Any]] = list(_ld_workbook_preamble())
     section_row_nums: List[int] = []
@@ -815,13 +1011,14 @@ def matrix_for_ld_workbook_multi(
         if i > 0:
             matrix.append(_section_row_f(f"Shaft {i}"))
             section_row_nums.append(len(matrix))
-        sub_m, sub_sec = matrix_for_ld_workbook(list(rows))
+        sub_m, sub_sec = matrix_for_ld_workbook(list(rows), with_mode_legend=False)
         body = sub_m[1:]
         offset = len(matrix)
         matrix.extend(body)
         for s in sub_sec:
             if s > 1:
                 section_row_nums.append(offset + (s - 1))
+    _apply_ld_mode_legend_to_rows_g234(matrix)
     return matrix, section_row_nums
 
 

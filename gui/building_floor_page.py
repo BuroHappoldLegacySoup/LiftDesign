@@ -18,7 +18,22 @@ from PyQt5.QtGui import QDoubleValidator
 import sys
 
 # Used by initUI and table rebuild; avoid QTableWidget.clear() — it strips horizontal headers (shows 1,2,3…).
-FLOOR_TABLE_HEADERS = ['Lift', 'Floor', 'Floor Name', 'Height (m)', 'Entrances']
+FLOOR_TABLE_HEADERS = ['Lift', 'Floor', 'Floor Name', 'Elevation (m)', 'Entrances']
+
+# Absolute elevation of each floor slab above a project datum, in metres. The LD
+# export maps this value (×1000 mm) directly to ``FLL.Level{i}.Z_POT``. Older saved
+# projects stored the per-floor *height increment* under ``Height (m)`` — read paths
+# fall back to that legacy key so they still load.
+FLOOR_ELEVATION_KEY = 'Elevation (m)'
+FLOOR_ELEVATION_LEGACY_KEY = 'Height (m)'
+
+
+def _read_floor_elevation(floor_data: dict) -> str:
+    """Return the floor's elevation, accepting the legacy ``Height (m)`` key."""
+    v = floor_data.get(FLOOR_ELEVATION_KEY, '')
+    if str(v).strip() == '':
+        v = floor_data.get(FLOOR_ELEVATION_LEGACY_KEY, '')
+    return str(v) if v is not None else ''
 
 # General specification keys — table row count follows *Number of floors*; *Stops* is fallback for older JSON.
 LS_KEY_NUM_FLOORS = 'Number of floors'
@@ -314,7 +329,7 @@ class BuildingFloorPage(QWidget):
                 name_widget.setText(str(floor_data.get('Floor Name', '')))
             height_widget = self.floor_table.cellWidget(row, 3)
             if isinstance(height_widget, QLineEdit):
-                height_widget.setText(str(floor_data.get('Height (m)', '')))
+                height_widget.setText(_read_floor_elevation(floor_data))
             type_widget = self.floor_table.cellWidget(row, 4)
             if isinstance(type_widget, EntranceTypeWidget):
                 type_widget.set_selected_entrances(floor_data.get('Entrances', []))
@@ -340,10 +355,10 @@ class BuildingFloorPage(QWidget):
                 if isinstance(name_widget, QLineEdit):
                     name_widget.setText(str(floor_data.get('Floor Name', '')))
                 
-                # Populate Height
+                # Populate Elevation (legacy projects may carry "Height (m)")
                 height_widget = self.floor_table.cellWidget(row, 3)
                 if isinstance(height_widget, QLineEdit):
-                    height_widget.setText(str(floor_data.get('Height (m)', '')))
+                    height_widget.setText(_read_floor_elevation(floor_data))
                 
                 # Populate Entrances
                 type_widget = self.floor_table.cellWidget(row, 4)
@@ -412,7 +427,7 @@ class BuildingFloorPage(QWidget):
                 floor_data = {
                     'Floor': floor_num,
                     'Floor Name': name_w.text() if isinstance(name_w, QLineEdit) else '',
-                    'Height (m)': height_w.text() if isinstance(height_w, QLineEdit) else '',
+                    FLOOR_ELEVATION_KEY: height_w.text() if isinstance(height_w, QLineEdit) else '',
                     'Entrances': entrances,
                 }
                 lift_floors.append(floor_data)
@@ -500,7 +515,7 @@ class BuildingFloorPage(QWidget):
                     lift_floors.append({
                         "Floor": floor_num,
                         "Floor Name": name_w.text() if isinstance(name_w, QLineEdit) else "",
-                        "Height (m)": height_w.text() if isinstance(height_w, QLineEdit) else "",
+                        FLOOR_ELEVATION_KEY: height_w.text() if isinstance(height_w, QLineEdit) else "",
                         "Entrances": entrances,
                     })
                 return lift_floors
@@ -606,15 +621,15 @@ if __name__ == '__main__':
     'Floors': [
         {
             'Lift 1': [
-                {'Floor': '0', 'Floor Name': 'Ground', 'Height (m)': '3.5', 'Entrances': ['Front', 'Side']},
-                {'Floor': '1', 'Floor Name': 'First', 'Height (m)': '3.0', 'Entrances': ['Front']},
-                {'Floor': '2', 'Floor Name': 'Second', 'Height (m)': '3.0', 'Entrances': ['Front', 'Rear', 'Side']}
+                {'Floor': '0', 'Floor Name': 'Ground', 'Elevation (m)': '0.0', 'Entrances': ['Front', 'Side']},
+                {'Floor': '1', 'Floor Name': 'First', 'Elevation (m)': '3.5', 'Entrances': ['Front']},
+                {'Floor': '2', 'Floor Name': 'Second', 'Elevation (m)': '6.5', 'Entrances': ['Front', 'Rear', 'Side']}
             ]
         },
         {
             'Lift 2': [
-                {'Floor': '0', 'Floor Name': 'Ground', 'Height (m)': '3.5', 'Entrances': ['Front', 'Rear']},
-                {'Floor': '1', 'Floor Name': 'First', 'Height (m)': '3.0', 'Entrances': ['Side']}
+                {'Floor': '0', 'Floor Name': 'Ground', 'Elevation (m)': '0.0', 'Entrances': ['Front', 'Rear']},
+                {'Floor': '1', 'Floor Name': 'First', 'Elevation (m)': '3.5', 'Entrances': ['Side']}
             ]
         }
     ]

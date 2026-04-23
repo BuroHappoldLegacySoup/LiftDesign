@@ -394,19 +394,48 @@ class LayoutInformationPage(QWidget):
         self.initialize_lift_columns()
 
     def populate_from_input(self, systems_data):
-        for col, system_data in enumerate(systems_data, start=2):
+        """Write saved LayoutInformation into the table without letting derivation cascades clobber it.
+
+        Every ``setText`` on e.g. *Cabin width* fires ``textChanged`` which chains into
+        :meth:`_apply_cabin_depth_for_column` → :meth:`_sync_derived_fields`, and a stray derived
+        result (``"non-std.cabin depth"``) or a re-derived cabin width can overwrite the saved
+        value the user painstakingly entered. Signals are blocked for the whole load so the table
+        ends up with **exactly** the saved values. Derivation is then reapplied only for columns
+        whose saved data left the key dimensions blank, preserving the auto-fill behaviour for
+        brand-new projects while never trampling stored user input.
+        """
+        # Block signals across every cell widget for the duration of the load.
+        blocked = []
+        for col in range(2, self.layout_table.columnCount()):
             for row in range(self.layout_table.rowCount()):
-                jk = self._layout_json_key_for_row(row)
-                if jk in system_data:
-                    cell_widget = self.layout_table.cellWidget(row, col)
-                    value = system_data[jk]
-                    if isinstance(cell_widget, QLineEdit):
-                        cell_widget.setText(str(value))
-                    elif isinstance(cell_widget, QComboBox):
-                        index = cell_widget.findText(str(value))
-                        if index >= 0:
-                            cell_widget.setCurrentIndex(index)
-            self._apply_cabin_width_for_column(col)
+                w = self.layout_table.cellWidget(row, col)
+                if w is not None:
+                    w.blockSignals(True)
+                    blocked.append(w)
+        try:
+            for col, system_data in enumerate(systems_data, start=2):
+                for row in range(self.layout_table.rowCount()):
+                    jk = self._layout_json_key_for_row(row)
+                    if jk in system_data:
+                        cell_widget = self.layout_table.cellWidget(row, col)
+                        value = system_data[jk]
+                        if isinstance(cell_widget, QLineEdit):
+                            cell_widget.setText(str(value))
+                        elif isinstance(cell_widget, QComboBox):
+                            index = cell_widget.findText(str(value))
+                            if index >= 0:
+                                cell_widget.setCurrentIndex(index)
+        finally:
+            for w in blocked:
+                w.blockSignals(False)
+
+        # Only fill in derived values for columns where the saved data did not provide them. A
+        # saved Cabin width (and the rest of the layout block) must never be overwritten by a
+        # formula just because the load capacity changed somewhere else in the project.
+        for col, system_data in enumerate(systems_data, start=2):
+            saved_width = str(system_data.get('Cabin width', '') or '').strip()
+            if not saved_width:
+                self._apply_cabin_width_for_column(col)
 
     def initialize_lift_columns(self):
         for _ in range(self.number_of_lifts):

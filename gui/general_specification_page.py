@@ -99,25 +99,38 @@ class GeneralSpecificationPage(QWidget):
 
     def __init__(self, user_inputs):
         super().__init__()
+        # Guard against re-entrant sync while the table is still being wired up. Creating the
+        # cell widgets fires ``QLineEdit.textChanged`` / ``QComboBox.currentTextChanged`` for the
+        # default values, which are connected to :meth:`_sync_lift_systems_to_user_inputs`. Without
+        # the flag the very first ``setText`` (on the persons cell, via the load-combo default in
+        # :meth:`add_lift_column`) triggers a sync that reads the blank-default widgets and
+        # **overwrites** the just-loaded ``user_inputs['GeneralSpecification']`` with defaults —
+        # so e.g. a saved ``Load capacity=2000`` silently becomes ``630`` on reopen.
+        self._suppress_sync = True
         self.user_inputs = user_inputs
         normalize_project_lift_data(self.user_inputs)
         self.number_of_lifts = self._needed_lift_columns()
         self.initUI()
 
-        # Always populate from ``GeneralSpecification`` (padded to column count). Do **not** branch on
-        # ``if systems:`` — an empty list [] skipped populate and ran _sync, overwriting file-backed
-        # values with default widgets (e.g. load 630 / persons 17).
-        systems = copy.deepcopy(self.user_inputs.get(KEY_GENERAL_SPECIFICATION) or [])
-        while len(systems) < self.number_of_lifts:
-            systems.append({})
-        while len(systems) > self.number_of_lifts:
-            systems.pop()
-        self.populate_from_input(systems)
-        self._apply_general_spec_widgets_to_lift_systems_merge(systems)
-        self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems
+        try:
+            # Always populate from ``GeneralSpecification`` (padded to column count). Do **not** branch on
+            # ``if systems:`` — an empty list [] skipped populate and ran _sync, overwriting file-backed
+            # values with default widgets (e.g. load 630 / persons 17).
+            systems = copy.deepcopy(self.user_inputs.get(KEY_GENERAL_SPECIFICATION) or [])
+            while len(systems) < self.number_of_lifts:
+                systems.append({})
+            while len(systems) > self.number_of_lifts:
+                systems.pop()
+            self.populate_from_input(systems)
+            self._apply_general_spec_widgets_to_lift_systems_merge(systems)
+            self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems
+        finally:
+            self._suppress_sync = False
 
     def _sync_lift_systems_to_user_inputs(self):
         """Keep general-spec columns in ``user_inputs['GeneralSpecification']`` aligned with the table."""
+        if getattr(self, '_suppress_sync', False):
+            return
         existing = self.user_inputs.get(KEY_GENERAL_SPECIFICATION) or []
         systems_data = []
         for col in range(2, self.system_table.columnCount()):
@@ -240,17 +253,21 @@ class GeneralSpecificationPage(QWidget):
 
     def refresh_from_project_data(self) -> None:
         """Re-read ``user_inputs['GeneralSpecification']`` into the table (e.g. after JSON load or re-entry)."""
-        normalize_project_lift_data(self.user_inputs)
-        self.number_of_lifts = self._needed_lift_columns()
-        self._ensure_lift_columns(self.number_of_lifts)
-        systems = copy.deepcopy(self.user_inputs.get(KEY_GENERAL_SPECIFICATION) or [])
-        while len(systems) < self.number_of_lifts:
-            systems.append({})
-        while len(systems) > self.number_of_lifts:
-            systems.pop()
-        self.populate_from_input(systems)
-        self._apply_general_spec_widgets_to_lift_systems_merge(systems)
-        self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems
+        self._suppress_sync = True
+        try:
+            normalize_project_lift_data(self.user_inputs)
+            self.number_of_lifts = self._needed_lift_columns()
+            self._ensure_lift_columns(self.number_of_lifts)
+            systems = copy.deepcopy(self.user_inputs.get(KEY_GENERAL_SPECIFICATION) or [])
+            while len(systems) < self.number_of_lifts:
+                systems.append({})
+            while len(systems) > self.number_of_lifts:
+                systems.pop()
+            self.populate_from_input(systems)
+            self._apply_general_spec_widgets_to_lift_systems_merge(systems)
+            self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems
+        finally:
+            self._suppress_sync = False
 
     def _apply_persons_for_load_column(self, col: int, load_text: str) -> None:
         """Row 21 persons from nominal load (kg) — Excel / VT standard table."""
