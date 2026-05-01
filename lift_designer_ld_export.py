@@ -15,8 +15,9 @@ Workbook layout (``SyncWithLD``): row **1** = titles in **A–F** and **Mode dec
 **G2–G4** hold the three mode lines on the **same** rows as the first content in **A–F** (Shaft0 data may start on row **2**).
 Default output file: ``LD data import test.xlsx``.
 
-Use :func:`write_ld_workbook_multi` with one row list per lift to produce a **single** workbook:
-preamble once, then **Shaft 1**, **Shaft 2**, … section rows before each additional lift’s block.
+Use :func:`write_ld_workbook_multi` with the rows for one or more lifts to produce one workbook
+(**Shaft *n*** between lifts in that file). Use :func:`write_ld_exports_per_group` to write **one
+file per Building System group** (from ``LiftColumnGroups``), each file containing only that group’s lifts.
 """
 from __future__ import annotations
 
@@ -38,6 +39,7 @@ __all__ = [
     "matrix_for_ld_workbook",
     "write_ld_workbook",
     "write_ld_workbook_multi",
+    "write_ld_exports_per_group",
     "write_ld_csv",
     "export_ld_data_import_test",
     "default_vt_workbook_path",
@@ -387,7 +389,17 @@ def _compliance_summary(ui: Mapping[str, Any], i: int) -> str:
         add("EN81-77")
 
     v = d.get("Green building certification compliance")
-    if v is not None and str(v).strip():
+    if v is None:
+        pass
+    elif isinstance(v, dict):
+        for scheme, sel in v.items():
+            if _compliance_checkbox_selected(sel):
+                add(_s(scheme))
+    elif isinstance(v, (list, tuple)):
+        for item in v:
+            if item is not None and str(item).strip():
+                add(_s(item))
+    elif str(v).strip():
         add(_s(v))
 
     v = d.get("EN81-58 Fire rating class")
@@ -795,9 +807,14 @@ def build_ld_rows_from_user_inputs(
     user_inputs: Mapping[str, Any],
     lift_index: int = 0,
     vt_path: Optional[str] = None,
+    door_manufacturer: Optional[str] = None,
 ) -> List[LDExportRow]:
     """
     Build export rows using ``VT standard configurations`` LD export column.
+
+    ``door_manufacturer`` selects the VT R277 manufacturer cell (drives door RID,
+    door depth and door/wall clearance lookups). When omitted, the value is taken
+    from ``user_inputs["DoorManufacturer"]`` (or the project default).
     """
     ctx = _ExportCtx(
         user_inputs=user_inputs,
@@ -808,7 +825,7 @@ def build_ld_rows_from_user_inputs(
         compliance=_compliance(user_inputs, lift_index),
         emergency=_emergency(user_inputs, lift_index),
         cost=_cost(user_inputs, lift_index),
-        derived=compute_derived(user_inputs, lift_index),
+        derived=compute_derived(user_inputs, lift_index, door_manufacturer=door_manufacturer),
     )
     rules = load_vt_export_rules(vt_path)
     rows: List[LDExportRow] = []
@@ -975,10 +992,19 @@ def build_ld_rows_per_lift(
     user_inputs: Mapping[str, Any],
     num_lifts: int,
     vt_path: Optional[str] = None,
+    door_manufacturer: Optional[str] = None,
 ) -> List[List[LDExportRow]]:
     """Return ``num_lifts`` row lists: index ``i`` is ``build_ld_rows_from_user_inputs(..., lift_index=i)``."""
     n = max(0, int(num_lifts))
-    return [build_ld_rows_from_user_inputs(user_inputs, lift_index=i, vt_path=vt_path) for i in range(n)]
+    return [
+        build_ld_rows_from_user_inputs(
+            user_inputs,
+            lift_index=i,
+            vt_path=vt_path,
+            door_manufacturer=door_manufacturer,
+        )
+        for i in range(n)
+    ]
 
 
 def matrix_for_ld_workbook_multi(
@@ -1007,6 +1033,73 @@ def matrix_for_ld_workbook_multi(
                 section_row_nums.append(offset + (s - 1))
     _apply_ld_mode_legend_to_rows_g234(matrix)
     return matrix, section_row_nums
+
+
+def _safe_ld_group_filename_segment(name: str, index_1based: int) -> str:
+    """Sanitize group title for use in a Windows filename segment."""
+    s = re.sub(r'[<>:"/\\|?*\n\r\t]', "_", (name or "").strip())
+    s = re.sub(r"\s+", "_", s).strip("_") or f"group{index_1based}"
+    return s[:80]
+
+
+def write_ld_exports_per_group(
+    base_save_path: str,
+    rows_by_lift: Sequence[Sequence[LDExportRow]],
+    lift_groups_raw: Optional[Sequence[Mapping[str, Any]]],
+    *,
+    sheet_title: str = "SyncWithLD",
+) -> List[str]:
+    """
+    Write **one** ``SyncWithLD`` workbook per Building System group.
+
+    ``base_save_path`` is the path chosen in the save dialog. With a single group, the workbook
+    is written exactly there. With multiple groups, files are
+    ``{stem}_{sanitized_group_title}.xlsx`` in the same directory (one suffix from the group name).
+
+    Row lists must align with ``LiftColumnGroups`` counts (normalized via
+    :func:`gui.project_lift_schema.parse_lift_column_groups`).
+    Returns all paths written.
+    """
+    from gui.project_lift_schema import merge_consecutive_lift_groups_same_name, parse_lift_column_groups
+
+    n = len(rows_by_lift)
+    groups = parse_lift_column_groups(list(lift_groups_raw) if lift_groups_raw is not None else [], n)
+    groups = merge_consecutive_lift_groups_same_name(groups)
+
+    pairs: List[Tuple[Mapping[str, Any], List[Sequence[LDExportRow]]]] = []
+    idx = 0
+    for g in groups:
+        cnt = int(g.get("count", 0))
+        if cnt <= 0:
+            continue
+        chunk = list(rows_by_lift[idx : idx + cnt])
+        idx += cnt
+        pairs.append((g, chunk))
+
+    if not pairs:
+        return []
+
+    if len(pairs) == 1:
+        write_ld_workbook_multi(base_save_path, pairs[0][1], sheet_title=sheet_title)
+        return [base_save_path]
+
+    parent = os.path.dirname(base_save_path)
+    stem = os.path.splitext(os.path.basename(base_save_path))[0]
+    written: List[str] = []
+    used_lower: set[str] = set()
+    for gi, (g, chunk) in enumerate(pairs):
+        safe = _safe_ld_group_filename_segment(str(g.get("name", "")), gi + 1)
+        fname = f"{stem}_{safe}.xlsx"
+        out_path = os.path.join(parent, fname)
+        key = out_path.lower()
+        if key in used_lower:
+            fname = f"{stem}_{safe}_{gi + 1}.xlsx"
+            out_path = os.path.join(parent, fname)
+            key = out_path.lower()
+        used_lower.add(key)
+        write_ld_workbook_multi(out_path, chunk, sheet_title=sheet_title)
+        written.append(out_path)
+    return written
 
 
 def _matrix_for_workbook(rows: Sequence[LDExportRow]) -> List[List[Any]]:
@@ -1089,7 +1182,7 @@ def write_ld_workbook_multi(
     rows_by_lift: Sequence[Sequence[LDExportRow]],
     sheet_title: str = "SyncWithLD",
 ) -> None:
-    """Write one ``SyncWithLD`` sheet with all lifts stacked; **Shaft *n*** separates lift blocks (``n >= 1``)."""
+    """Write one ``SyncWithLD`` sheet: preamble once, then each lift block (**Shaft *n*** between lifts)."""
     matrix, section_row_nums = matrix_for_ld_workbook_multi(rows_by_lift)
     _write_ld_matrix_to_path(path, matrix, section_row_nums, sheet_title=sheet_title)
 
@@ -1149,7 +1242,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--all-lifts",
         action="store_true",
-        help="Write one workbook with every lift stacked (Shaft 1, Shaft 2, … section rows between blocks).",
+        help="Write LD workbook(s): one file per lift group (LiftColumnGroups), or one file if there is a single group.",
     )
     args = p.parse_args()
 
@@ -1186,10 +1279,17 @@ if __name__ == "__main__":
 
     out = args.output or os.path.join(os.path.dirname(__file__), "LD data import test.xlsx")
     if args.all_lifts:
+        try:
+            from gui.project_lift_schema import KEY_LIFT_COLUMN_GROUPS
+        except ImportError:
+            print("Import error: run from the project root so the gui package is found.", file=sys.stderr)
+            raise SystemExit(1) from None
         n = len(data.get("BuildingSystems") or [])
         rows_by_lift = build_ld_rows_per_lift(data, n)
-        write_ld_workbook_multi(out, rows_by_lift)
-        path = out
+        paths = write_ld_exports_per_group(out, rows_by_lift, data.get(KEY_LIFT_COLUMN_GROUPS))
+        for p in paths:
+            print(p)
+        path = paths[-1] if paths else out
     else:
         path = export_ld_data_import_test(
             data,

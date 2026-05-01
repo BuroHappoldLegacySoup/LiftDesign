@@ -49,8 +49,13 @@ class OverrideComboBox(QComboBox):
       by the VT Schedules export to locate the matching template cell.
     """
 
+    # Editable combos paint most of the cell in the embedded ``QLineEdit``; style
+    # both the frame and the editor so override yellow (and page-specific base
+    # greens) actually cover the typing area — otherwise the inner field can stay
+    # white and hide the non-standard hint.
     _OVERRIDE_STYLE_TEMPLATE = (
         "QComboBox {{ background-color: {bg}; }}"
+        "QComboBox QLineEdit {{ background-color: {bg}; }}"
         "QComboBox QAbstractItemView {{ background-color: white; }}"
     )
 

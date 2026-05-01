@@ -14,7 +14,64 @@ combines both dicts for code that needs a single merged view (export, derived ca
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, MutableMapping
+from typing import Any, Dict, List, Mapping, MutableMapping, Sequence
+
+# Building System page: consecutive lift columns merged under group headers; sums to ``len(BuildingSystems)``.
+KEY_LIFT_COLUMN_GROUPS = "LiftColumnGroups"
+
+
+def parse_lift_column_groups(raw: Any, n_lifts: int) -> List[Dict[str, Any]]:
+    """
+    Normalize JSON (or in-memory list) to ``[{"name": str, "count": int}, ...]`` summing to ``n_lifts``.
+
+    Used by the Building System UI, LD Excel export grouping, and the lift-groups dialog.
+    """
+    out: List[Dict[str, Any]] = []
+    if isinstance(raw, list):
+        for x in raw:
+            if not isinstance(x, dict):
+                continue
+            try:
+                cnt = int(x.get("count", 0))
+            except (TypeError, ValueError):
+                cnt = 0
+            name = str(x.get("name", "") or "").strip()
+            if cnt > 0:
+                out.append({"name": name, "count": cnt})
+    if sum(g["count"] for g in out) == n_lifts and out:
+        return out
+    return [{"name": f"Group {i + 1}", "count": 1} for i in range(max(0, n_lifts))]
+
+
+def _normalized_lift_group_title(s: str) -> str:
+    return " ".join(str(s or "").lower().split())
+
+
+def merge_consecutive_lift_groups_same_name(
+    groups: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Merge **adjacent** group entries when titles match case-insensitively (same logical group).
+
+    Used by LD export when stored ``LiftColumnGroups`` repeated one row per lift even though the
+    Building System table showed one merged header for several lifts with the same name.
+    """
+    merged: List[Dict[str, Any]] = []
+    for g in groups:
+        try:
+            cnt = int(g.get("count", 0))
+        except (TypeError, ValueError):
+            cnt = 0
+        if cnt <= 0:
+            continue
+        name = str(g.get("name", "") or "").strip()
+        key = _normalized_lift_group_title(name)
+        if merged and _normalized_lift_group_title(str(merged[-1].get("name", ""))) == key:
+            merged[-1]["count"] = int(merged[-1]["count"]) + cnt
+        else:
+            merged.append({"name": name, "count": cnt})
+    return merged
+
 
 # Legacy ``GeneralSpecification`` keys (units / Stck. in the key) → canonical keys (value-only; units are not in the key).
 # Canonical names match the Description column on the General specification page; units live in the separate Unit column.

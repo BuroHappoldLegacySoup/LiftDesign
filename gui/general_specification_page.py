@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator
 
+from .formula_line_edit import apply_formula_value
 from .override_combobox import OverrideComboBox
 from .lift_types import LOAD_CAPACITY_KG, LiftSystemType, permissible_persons_for_capacity
 from .project_lift_schema import (
@@ -23,8 +24,39 @@ from .project_lift_schema import (
     KEY_LAYOUT_INFORMATION,
     normalize_project_lift_data,
 )
+from .custom_parameter_rows import (
+    KEY_CUSTOM_GENERAL_SPEC,
+    add_plus_minus_button_row,
+    append_custom_row_two_column_headers,
+    clear_rows_from,
+    default_custom_name,
+    meta_from_table,
+    normalize_meta_list,
+)
 
 _MISSING = object()
+
+# Highlight colour for cells that must be filled in by the user. Matches the
+# lime-green accent used for the page borders / titles so the "please fill me"
+# fields visually tie back to the rest of the UI chrome.
+REQUIRED_FIELD_BG_CSS: str = "rgb(196, 214, 0)"
+REQUIRED_FIELD_LINE_EDIT_QSS: str = (
+    f"QLineEdit {{ background-color: {REQUIRED_FIELD_BG_CSS}; }}"
+)
+REQUIRED_FIELD_COMBO_QSS: str = (
+    f"QComboBox {{ background-color: {REQUIRED_FIELD_BG_CSS}; }}"
+    f"QComboBox QLineEdit {{ background-color: {REQUIRED_FIELD_BG_CSS}; }}"
+)
+
+# Rows in ``GENERAL_SPEC_ROWS`` whose cells the user is expected to fill in
+# manually for every lift. Highlighted with ``REQUIRED_FIELD_BG_CSS`` so they
+# stand out against the auto-derived / fixed rows.
+REQUIRED_FIELD_ROW_KEYS: frozenset[str] = frozenset({
+    'Load capacity',
+    'Speed',
+    'Access type',
+    'Accessible rooms/cwt safety',
+})
 
 
 def _general_spec_double_validator() -> QDoubleValidator:
@@ -83,6 +115,8 @@ GENERAL_SPEC_ROWS: tuple[tuple[str, str, str], ...] = (
     ('Accessible rooms/cwt safety', 'Accessible rooms / cwt safety', 'y/n'),
 )
 
+GENERAL_SPEC_FIXED_JSON_KEYS = frozenset(row[0] for row in GENERAL_SPEC_ROWS)
+
 
 def _normalize_general_spec_key(s: str) -> str:
     """Unify Unicode so JSON keys match table labels (e.g. m/s² vs m/s2 after NFKC)."""
@@ -94,9 +128,11 @@ class GeneralSpecificationPage(QWidget):
     next_clicked = pyqtSignal(dict)
     back_clicked = pyqtSignal()
 
-    @staticmethod
-    def _json_key_for_row(row: int) -> str:
-        return GENERAL_SPEC_ROWS[row][0]
+    def _json_key_for_row(self, row: int) -> str:
+        if row < len(GENERAL_SPEC_ROWS):
+            return GENERAL_SPEC_ROWS[row][0]
+        w = self.system_table.cellWidget(row, 0)
+        return w.text().strip() if isinstance(w, QLineEdit) else ""
 
     def __init__(self, user_inputs):
         super().__init__()
@@ -122,6 +158,7 @@ class GeneralSpecificationPage(QWidget):
                 systems.append({})
             while len(systems) > self.number_of_lifts:
                 systems.pop()
+            self._rebuild_custom_general_rows(systems)
             self.populate_from_input(systems)
             self._apply_general_spec_widgets_to_lift_systems_merge(systems)
             self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems
@@ -139,6 +176,8 @@ class GeneralSpecificationPage(QWidget):
             merged = dict(existing[idx]) if idx < len(existing) else {}
             for row in range(self.system_table.rowCount()):
                 json_key = self._json_key_for_row(row)
+                if not json_key:
+                    continue
                 cell_widget = self.system_table.cellWidget(row, col)
                 if isinstance(cell_widget, QLineEdit):
                     value = cell_widget.text()
@@ -162,6 +201,74 @@ class GeneralSpecificationPage(QWidget):
                 merged[json_key] = ''
             systems_data.append(merged)
         self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems_data
+        self.user_inputs[KEY_CUSTOM_GENERAL_SPEC] = meta_from_table(
+            self.system_table,
+            fixed_row_count=len(GENERAL_SPEC_ROWS),
+            has_unit_column=True,
+        )
+
+    def _infer_general_custom_meta(self, systems: list) -> list:
+        meta = normalize_meta_list(self.user_inputs.get(KEY_CUSTOM_GENERAL_SPEC))
+        if meta:
+            return meta
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for sys in systems:
+            if not isinstance(sys, dict):
+                continue
+            for k in sys:
+                if k in GENERAL_SPEC_FIXED_JSON_KEYS or k in seen:
+                    continue
+                seen.add(k)
+                ordered.append(k)
+        return [{"name": k, "unit": ""} for k in ordered]
+
+    def _fill_custom_general_value_cell(self, row: int, col: int) -> None:
+        w = QLineEdit()
+        w.setValidator(_general_spec_double_validator())
+        self.system_table.setCellWidget(row, col, w)
+        self._connect_cell_widget_sync(w)
+
+    def _rebuild_custom_general_rows(self, systems: list) -> None:
+        clear_rows_from(self.system_table, len(GENERAL_SPEC_ROWS))
+        meta = self._infer_general_custom_meta(systems)
+        used: set[str] = set()
+        for entry in meta:
+            raw_name = str(entry.get("name", "") or "").strip()
+            unit = str(entry.get("unit", "") or "").strip()
+            name = raw_name if raw_name else default_custom_name(used)
+            used.add(name)
+            append_custom_row_two_column_headers(
+                self.system_table,
+                name=name,
+                unit=unit,
+                first_data_col=2,
+                fill_data_cell=self._fill_custom_general_value_cell,
+                on_change=self._sync_lift_systems_to_user_inputs,
+            )
+
+    def _on_add_custom_parameter_row(self) -> None:
+        used: set[str] = set()
+        for r in range(len(GENERAL_SPEC_ROWS), self.system_table.rowCount()):
+            w = self.system_table.cellWidget(r, 0)
+            if isinstance(w, QLineEdit) and w.text().strip():
+                used.add(w.text().strip())
+        name = default_custom_name(used)
+        append_custom_row_two_column_headers(
+            self.system_table,
+            name=name,
+            unit="",
+            first_data_col=2,
+            fill_data_cell=self._fill_custom_general_value_cell,
+            on_change=self._sync_lift_systems_to_user_inputs,
+        )
+        self._sync_lift_systems_to_user_inputs()
+
+    def _on_remove_custom_parameter_row(self) -> None:
+        if self.system_table.rowCount() <= len(GENERAL_SPEC_ROWS):
+            return
+        self.system_table.removeRow(self.system_table.rowCount() - 1)
+        self._sync_lift_systems_to_user_inputs()
 
     def _connect_cell_widget_sync(self, widget):
         if isinstance(widget, QLineEdit):
@@ -236,6 +343,8 @@ class GeneralSpecificationPage(QWidget):
             base = systems[idx]
             for row in range(self.system_table.rowCount()):
                 json_key = self._json_key_for_row(row)
+                if not json_key:
+                    continue
                 cell_widget = self.system_table.cellWidget(row, col)
                 if isinstance(cell_widget, QLineEdit):
                     v = cell_widget.text().strip()
@@ -264,6 +373,7 @@ class GeneralSpecificationPage(QWidget):
                 systems.append({})
             while len(systems) > self.number_of_lifts:
                 systems.pop()
+            self._rebuild_custom_general_rows(systems)
             self.populate_from_input(systems)
             self._apply_general_spec_widgets_to_lift_systems_merge(systems)
             self.user_inputs[KEY_GENERAL_SPECIFICATION] = systems
@@ -277,7 +387,7 @@ class GeneralSpecificationPage(QWidget):
             return
         w = self.system_table.cellWidget(6, col)
         if isinstance(w, QLineEdit):
-            w.setText(p)
+            apply_formula_value(w, p)
 
     def initUI(self):
         self.setMinimumSize(800, 600)
@@ -323,6 +433,11 @@ class GeneralSpecificationPage(QWidget):
         self.system_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         system_layout.addWidget(self.system_table)
+        add_plus_minus_button_row(
+            system_layout,
+            self._on_add_custom_parameter_row,
+            self._on_remove_custom_parameter_row,
+        )
 
         save_button = QPushButton('Save and Proceed')
         save_button.setStyleSheet("background-color: white;")
@@ -350,7 +465,7 @@ class GeneralSpecificationPage(QWidget):
         try:
             for col, system_data in enumerate(systems_data, start=2):
                 load_widget = self.system_table.cellWidget(5, col)
-                for row in range(self.system_table.rowCount()):
+                for row in range(len(GENERAL_SPEC_ROWS)):
                     json_key = self._json_key_for_row(row)
                     value = self._get_spec_value(system_data, json_key)
                     if value is _MISSING:
@@ -365,6 +480,19 @@ class GeneralSpecificationPage(QWidget):
                         )
                     elif isinstance(cell_widget, QComboBox):
                         self._set_combo_value(cell_widget, value)
+                for row in range(len(GENERAL_SPEC_ROWS), self.system_table.rowCount()):
+                    json_key = self._json_key_for_row(row)
+                    if not json_key:
+                        continue
+                    value = self._get_spec_value(system_data, json_key)
+                    if value is _MISSING:
+                        continue
+                    cell_widget = self.system_table.cellWidget(row, col)
+                    if isinstance(cell_widget, QLineEdit):
+                        _set_line_edit_text_bypassing_validator(
+                            cell_widget,
+                            _line_edit_text_for_numeric_value(value),
+                        )
                 persons_w = self.system_table.cellWidget(6, col)
                 if (
                     isinstance(persons_w, QLineEdit)
@@ -388,7 +516,7 @@ class GeneralSpecificationPage(QWidget):
             col_position, QTableWidgetItem(f'Lift {col_position - 1}')
         )
 
-        for row in range(self.system_table.rowCount()):
+        for row in range(len(GENERAL_SPEC_ROWS)):
             if row == 0:
                 widget = OverrideComboBox()
                 widget.addItems(list(LiftSystemType.ALL))
@@ -426,12 +554,24 @@ class GeneralSpecificationPage(QWidget):
             if isinstance(widget, OverrideComboBox):
                 widget.set_override_context(GENERAL_SPEC_ROWS[row][1], col_position - 2)
 
+            if GENERAL_SPEC_ROWS[row][0] in REQUIRED_FIELD_ROW_KEYS:
+                if isinstance(widget, OverrideComboBox):
+                    # Base stylesheet keeps the green fill on standard values and
+                    # is preserved by ``OverrideComboBox`` even when the override
+                    # (amber) state takes over for non-standard text.
+                    widget.set_base_style_sheet(REQUIRED_FIELD_COMBO_QSS)
+                elif isinstance(widget, QLineEdit):
+                    widget.setStyleSheet(REQUIRED_FIELD_LINE_EDIT_QSS)
+
             self.system_table.setCellWidget(row, col_position, widget)
             self._connect_cell_widget_sync(widget)
 
         load_w = self.system_table.cellWidget(5, col_position)
         if isinstance(load_w, QComboBox):
             self._apply_persons_for_load_column(col_position, load_w.currentText())
+
+        for row in range(len(GENERAL_SPEC_ROWS), self.system_table.rowCount()):
+            self._fill_custom_general_value_cell(row, col_position)
 
     def collect_data_and_go_next(self):
         self._sync_lift_systems_to_user_inputs()

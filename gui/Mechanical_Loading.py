@@ -15,11 +15,22 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator, QShowEvent
+import copy
 import os
 import sys
 
+from .formula_line_edit import apply_formula_value
 from .override_combobox import OverrideComboBox
 from .project_lift_schema import ensure_lift_section_slots, merged_lift_at
+from .custom_parameter_rows import (
+    KEY_CUSTOM_FORCES,
+    add_plus_minus_button_row,
+    append_custom_row_two_column_headers,
+    clear_rows_from,
+    default_custom_name,
+    meta_from_table,
+    normalize_meta_list,
+)
 
 try:
     from .lift_types import (
@@ -68,6 +79,7 @@ class ForceSpecPage(QWidget):
     )
 
     DESCRIPTIONS = tuple(r[0] for r in FORCES_ROWS)
+    FORCES_FIXED_KEYS = frozenset(DESCRIPTIONS)
 
     ROW_RAIL_CAR = 0
     ROW_CAR_BUFFERS = 2
@@ -91,6 +103,12 @@ class ForceSpecPage(QWidget):
         "Number of cwt buffers": ("number of cwt buffers (kg/m)", "Number of cwt buffers (St.)"),
     }
 
+    def _forces_json_key_for_row(self, row: int) -> str:
+        if row < len(self.FORCES_ROWS):
+            return self.DESCRIPTIONS[row]
+        w = self.force_table.cellWidget(row, 0)
+        return w.text().strip() if isinstance(w, QLineEdit) else ""
+
     def __init__(self, user_inputs):
         super().__init__()
         self.user_inputs = user_inputs
@@ -98,8 +116,13 @@ class ForceSpecPage(QWidget):
         ensure_lift_section_slots(self.user_inputs, self.number_of_lifts)
         self.initUI()
 
-        if "Forces" in self.user_inputs:
-            self.populate_from_input(self.user_inputs["Forces"])
+        forces = copy.deepcopy(self.user_inputs.get("Forces") or [])
+        while len(forces) < self.number_of_lifts:
+            forces.append({})
+        while len(forces) > self.number_of_lifts:
+            forces.pop()
+        self._rebuild_custom_forces_rows(forces)
+        self.populate_from_input(forces)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -148,6 +171,13 @@ class ForceSpecPage(QWidget):
         idx = col - 2
         lift = self._lift_at_column(col)
 
+        _blocked = []
+        for row in self.ROWS_COMPUTED_LINEEDIT:
+            ww = self.force_table.cellWidget(row, col)
+            if isinstance(ww, QLineEdit):
+                ww.blockSignals(True)
+                _blocked.append(ww)
+
         w_car = self.force_table.cellWidget(self.ROW_CAR_BUFFERS, col)
         w_cwt = self.force_table.cellWidget(self.ROW_CWT_BUFFERS, col)
         cb = self.force_table.cellWidget(self.ROW_CWT_SAFETY, col)
@@ -160,38 +190,43 @@ class ForceSpecPage(QWidget):
         cw_arg = str(cw_i) if cw_i is not None else lift.get(self.CABIN_W_KEY)
         cd_arg = str(cd_i) if cd_i is not None else lift.get(self.CABIN_D_KEY)
 
-        derived = mechanical_loading_derived_for_lift(
-            lift.get(self.LOAD_KEY),
-            lift.get(self.TRAVEL_KEY),
-            cw_arg,
-            cd_arg,
-            cwt_yes,
-            n_car or "2",
-            n_cwt or "2",
-        )
+        try:
+            derived = mechanical_loading_derived_for_lift(
+                lift.get(self.LOAD_KEY),
+                lift.get(self.TRAVEL_KEY),
+                cw_arg,
+                cd_arg,
+                cwt_yes,
+                n_car or "2",
+                n_cwt or "2",
+            )
 
-        for row in range(self.force_table.rowCount()):
-            if row not in self.ROWS_COMPUTED_LINEEDIT:
-                continue
-            jk = self.DESCRIPTIONS[row]
-            w = self.force_table.cellWidget(row, col)
-            if not isinstance(w, QLineEdit):
-                continue
-            if jk in derived:
-                w.setText(derived[jk])
-            else:
-                forces = self.user_inputs.get("Forces") or []
-                stored = None
-                if 0 <= idx < len(forces) and isinstance(forces[idx], dict):
-                    stored = forces[idx].get(jk)
-                if stored is not None and str(stored).strip() != "":
-                    w.setText(str(stored))
+            for row in range(self.force_table.rowCount()):
+                if row not in self.ROWS_COMPUTED_LINEEDIT:
+                    continue
+                jk = self.DESCRIPTIONS[row]
+                w = self.force_table.cellWidget(row, col)
+                if not isinstance(w, QLineEdit):
+                    continue
+                if jk in derived:
+                    apply_formula_value(w, derived[jk])
                 else:
-                    w.setText("")
+                    forces = self.user_inputs.get("Forces") or []
+                    stored = None
+                    if 0 <= idx < len(forces) and isinstance(forces[idx], dict):
+                        stored = forces[idx].get(jk)
+                    if stored is not None and str(stored).strip() != "":
+                        w.setText(str(stored))
+                    else:
+                        w.setText("")
+                    apply_formula_value(w, None)
+        finally:
+            for ww in _blocked:
+                ww.blockSignals(False)
 
     def populate_from_input(self, forces_data):
         for col, force_data in enumerate(forces_data, start=2):
-            for row in range(self.force_table.rowCount()):
+            for row in range(len(self.FORCES_ROWS)):
                 jk = self.DESCRIPTIONS[row]
                 value = self._cell_value_for_description(force_data, jk)
                 if value is None:
@@ -208,6 +243,16 @@ class ForceSpecPage(QWidget):
                         str(value).lower() in ("yes", "true", "1")
                         or value is True
                     )
+            for row in range(len(self.FORCES_ROWS), self.force_table.rowCount()):
+                jk = self._forces_json_key_for_row(row)
+                if not jk:
+                    continue
+                value = self._cell_value_for_description(force_data, jk)
+                if value is None:
+                    continue
+                cell_widget = self.force_table.cellWidget(row, col)
+                if isinstance(cell_widget, QLineEdit):
+                    cell_widget.setText(str(value))
             self._sync_derived_fields(col)
 
     def initUI(self):
@@ -253,6 +298,11 @@ class ForceSpecPage(QWidget):
         self.force_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         force_layout.addWidget(self.force_table)
+        add_plus_minus_button_row(
+            force_layout,
+            self._on_add_custom_parameter_row,
+            self._on_remove_custom_parameter_row,
+        )
 
         save_button = QPushButton("Save and Proceed")
         save_button.setStyleSheet("background-color: white;")
@@ -281,7 +331,7 @@ class ForceSpecPage(QWidget):
 
         lift = self._lift_at_column(col_position)
 
-        for row in range(self.force_table.rowCount()):
+        for row in range(len(self.FORCES_ROWS)):
             if row == self.ROW_RAIL_CAR:
                 widget = OverrideComboBox()
                 widget.setInsertPolicy(QComboBox.NoInsert)
@@ -328,15 +378,81 @@ class ForceSpecPage(QWidget):
                 widget.textChanged.connect(lambda _t, cp=col_position: self._sync_derived_fields(cp))
             elif row in self.ROWS_COMPUTED_LINEEDIT:
                 widget = QLineEdit()
-                widget.setReadOnly(True)
                 widget.setPlaceholderText("—")
+                widget.textChanged.connect(
+                    lambda _t, cp=col_position: self._sync_derived_fields(cp)
+                )
+            else:
+                widget = QLineEdit()
 
             if isinstance(widget, OverrideComboBox):
                 widget.set_override_context(self.FORCES_ROWS[row][1], col_position - 2)
 
             self.force_table.setCellWidget(row, col_position, widget)
 
+        for row in range(len(self.FORCES_ROWS), self.force_table.rowCount()):
+            self._fill_custom_forces_cell(row, col_position)
+
         self._sync_derived_fields(col_position)
+
+    def _infer_forces_custom_meta(self, forces_list: list) -> list:
+        meta = normalize_meta_list(self.user_inputs.get(KEY_CUSTOM_FORCES))
+        if meta:
+            return meta
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for entry in forces_list:
+            if not isinstance(entry, dict):
+                continue
+            for k in entry:
+                if k in self.FORCES_FIXED_KEYS or k in seen:
+                    continue
+                seen.add(k)
+                ordered.append(k)
+        return [{"name": k, "unit": ""} for k in ordered]
+
+    def _fill_custom_forces_cell(self, row: int, col: int) -> None:
+        w = QLineEdit()
+        w.setPlaceholderText("—")
+        self.force_table.setCellWidget(row, col, w)
+
+    def _rebuild_custom_forces_rows(self, forces_list: list) -> None:
+        clear_rows_from(self.force_table, len(self.FORCES_ROWS))
+        meta = self._infer_forces_custom_meta(forces_list)
+        used: set[str] = set()
+        for entry in meta:
+            raw_name = str(entry.get("name", "") or "").strip()
+            unit = str(entry.get("unit", "") or "").strip()
+            name = raw_name if raw_name else default_custom_name(used)
+            used.add(name)
+            append_custom_row_two_column_headers(
+                self.force_table,
+                name=name,
+                unit=unit,
+                first_data_col=2,
+                fill_data_cell=self._fill_custom_forces_cell,
+            )
+
+    def _on_add_custom_parameter_row(self) -> None:
+        used: set[str] = set()
+        for r in range(len(self.FORCES_ROWS), self.force_table.rowCount()):
+            w = self.force_table.cellWidget(r, 0)
+            if isinstance(w, QLineEdit) and w.text().strip():
+                used.add(w.text().strip())
+        name = default_custom_name(used)
+        append_custom_row_two_column_headers(
+            self.force_table,
+            name=name,
+            unit="",
+            first_data_col=2,
+            fill_data_cell=self._fill_custom_forces_cell,
+        )
+
+    def _on_remove_custom_parameter_row(self) -> None:
+        if self.force_table.rowCount() <= len(self.FORCES_ROWS):
+            return
+        self.force_table.removeRow(self.force_table.rowCount() - 1)
+        self.sync_forces_to_user_inputs()
 
     def sync_forces_to_user_inputs(self):
         """Write mechanical loading table into ``user_inputs``."""
@@ -346,7 +462,9 @@ class ForceSpecPage(QWidget):
             idx = col - 2
             merged = dict(existing[idx]) if idx < len(existing) and isinstance(existing[idx], dict) else {}
             for row in range(self.force_table.rowCount()):
-                jk = self.DESCRIPTIONS[row]
+                jk = self._forces_json_key_for_row(row)
+                if not jk:
+                    continue
                 cell_widget = self.force_table.cellWidget(row, col)
 
                 if isinstance(cell_widget, QLineEdit):
@@ -378,6 +496,11 @@ class ForceSpecPage(QWidget):
             forces_data.append(merged)
 
         self.user_inputs["Forces"] = forces_data
+        self.user_inputs[KEY_CUSTOM_FORCES] = meta_from_table(
+            self.force_table,
+            fixed_row_count=len(self.FORCES_ROWS),
+            has_unit_column=True,
+        )
 
     def collect_data_and_go_next(self):
         self.sync_forces_to_user_inputs()

@@ -253,11 +253,15 @@ def build_schedule_rows_from_user_inputs(
     user_inputs: Mapping[str, Any],
     lift_index: int = 0,
     vt_path: Optional[str] = None,
+    door_manufacturer: Optional[str] = None,
 ) -> List[ScheduleRow]:
     """
     Build the ordered schedule rows for one lift by resolving every ``yes`` parameter
     label through the LD export's :func:`_value_for_param`. Section rules pass through
     as section marker rows (``is_section=True``).
+
+    ``door_manufacturer`` selects the VT R277 manufacturer cell. See
+    :func:`lift_designer_vt_derived.compute_derived` for the resolution rules.
     """
     ctx = _ExportCtx(
         user_inputs=user_inputs,
@@ -268,7 +272,7 @@ def build_schedule_rows_from_user_inputs(
         compliance=_compliance(user_inputs, lift_index),
         emergency=_emergency(user_inputs, lift_index),
         cost=_cost(user_inputs, lift_index),
-        derived=compute_derived(user_inputs, lift_index),
+        derived=compute_derived(user_inputs, lift_index, door_manufacturer=door_manufacturer),
     )
     rules = load_vt_schedule_rules(vt_path)
     rows: List[ScheduleRow] = []
@@ -298,11 +302,17 @@ def build_schedule_rows_per_lift(
     user_inputs: Mapping[str, Any],
     num_lifts: int,
     vt_path: Optional[str] = None,
+    door_manufacturer: Optional[str] = None,
 ) -> List[List[ScheduleRow]]:
     """Return ``num_lifts`` row lists — one per lift index."""
     n = max(0, int(num_lifts))
     return [
-        build_schedule_rows_from_user_inputs(user_inputs, lift_index=i, vt_path=vt_path)
+        build_schedule_rows_from_user_inputs(
+            user_inputs,
+            lift_index=i,
+            vt_path=vt_path,
+            door_manufacturer=door_manufacturer,
+        )
         for i in range(n)
     ]
 
@@ -614,7 +624,11 @@ def _write_revision_block(ws, revisions: Sequence[Mapping[str, Any]]) -> int:
     return len(trimmed)
 
 
-def _build_ctx(user_inputs: Mapping[str, Any], lift_index: int) -> _ExportCtx:
+def _build_ctx(
+    user_inputs: Mapping[str, Any],
+    lift_index: int,
+    door_manufacturer: Optional[str] = None,
+) -> _ExportCtx:
     """Assemble the per-lift resolver context used by :func:`_value_for_param`."""
     return _ExportCtx(
         user_inputs=user_inputs,
@@ -625,7 +639,7 @@ def _build_ctx(user_inputs: Mapping[str, Any], lift_index: int) -> _ExportCtx:
         compliance=_compliance(user_inputs, lift_index),
         emergency=_emergency(user_inputs, lift_index),
         cost=_cost(user_inputs, lift_index),
-        derived=compute_derived(user_inputs, lift_index),
+        derived=compute_derived(user_inputs, lift_index, door_manufacturer=door_manufacturer),
     )
 
 
@@ -636,6 +650,7 @@ def write_schedule_workbook_from_template(
     template_path: Optional[str] = None,
     revisions: Optional[Sequence[Mapping[str, Any]]] = None,
     overrides: Optional[Mapping[int, Sequence[str]]] = None,
+    door_manufacturer: Optional[str] = None,
 ) -> int:
     """
     Fill the VT Schedules template with values resolved from ``user_inputs`` and
@@ -703,7 +718,7 @@ def write_schedule_workbook_from_template(
 
     for n in range(1, lifts_to_write + 1):
         lift_index = n - 1
-        ctx = _build_ctx(user_inputs, lift_index)
+        ctx = _build_ctx(user_inputs, lift_index, door_manufacturer=door_manufacturer)
         target_col = _lift_column_index(n)
         lift_overrides = normalized_overrides.get(lift_index, set())
 
@@ -718,6 +733,14 @@ def write_schedule_workbook_from_template(
             if value in (None, ""):
                 continue
             cell = ws.cell(r, target_col)
+            # Preserve template-authored Excel formulas (V3.0 introduced cascading
+            # formulas like =H82+1.5 / =ROUND(...) / =H53). The template's formula
+            # is authoritative for those cells — overwriting them with a static
+            # value would break the user's interactive recalc when they edit a
+            # dependency cell in Excel. Leave the formula in place.
+            existing = cell.value
+            if isinstance(existing, str) and existing.startswith("="):
+                continue
             cell.value = _coerce_cell_value(value)
             if lift_overrides and _normalize_override_label(label) in lift_overrides:
                 cell.fill = override_fill

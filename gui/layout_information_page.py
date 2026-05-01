@@ -8,14 +8,35 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator, QShowEvent
+import copy
 import os
 import sys
+from typing import Optional
 
+from .formula_line_edit import apply_formula_value
 from .override_combobox import OverrideComboBox
+
+# Lime-green accent used by the page borders / titles. Reused as the fill for
+# cells the user must complete (here: Cabin type/shape) so they line up with
+# the matching highlights on the General Specification page.
+REQUIRED_FIELD_BG_CSS: str = "rgb(196, 214, 0)"
+REQUIRED_FIELD_COMBO_QSS: str = (
+    f"QComboBox {{ background-color: {REQUIRED_FIELD_BG_CSS}; }}"
+    f"QComboBox QLineEdit {{ background-color: {REQUIRED_FIELD_BG_CSS}; }}"
+)
 from .project_lift_schema import (
     KEY_LAYOUT_INFORMATION,
     merged_lift_at,
     normalize_project_lift_data,
+)
+from .custom_parameter_rows import (
+    KEY_CUSTOM_LAYOUT,
+    add_plus_minus_button_row,
+    append_custom_row_two_column_headers,
+    clear_rows_from,
+    default_custom_name,
+    meta_from_table,
+    normalize_meta_list,
 )
 
 try:
@@ -119,9 +140,13 @@ class LayoutInformationPage(QWidget):
         ('Lift vestibule depth', 'Lift vestibule depth', 'mm'),
     )
 
-    @staticmethod
-    def _layout_json_key_for_row(row: int) -> str:
-        return LayoutInformationPage.LAYOUT_ROWS[row][0]
+    LAYOUT_FIXED_JSON_KEYS = frozenset(r[0] for r in LAYOUT_ROWS)
+
+    def _layout_json_key_for_row(self, row: int) -> str:
+        if row < len(self.LAYOUT_ROWS):
+            return self.LAYOUT_ROWS[row][0]
+        w = self.layout_table.cellWidget(row, 0)
+        return w.text().strip() if isinstance(w, QLineEdit) else ""
 
     def __init__(self, user_inputs):
         super().__init__()
@@ -130,8 +155,13 @@ class LayoutInformationPage(QWidget):
         self.number_of_lifts = len(user_inputs['BuildingSystems'])
         self.initUI()
 
-        if self.user_inputs.get(KEY_LAYOUT_INFORMATION):
-            self.populate_from_input(self.user_inputs[KEY_LAYOUT_INFORMATION])
+        systems = copy.deepcopy(self.user_inputs.get(KEY_LAYOUT_INFORMATION) or [])
+        while len(systems) < self.number_of_lifts:
+            systems.append({})
+        while len(systems) > self.number_of_lifts:
+            systems.pop()
+        self._rebuild_custom_layout_rows(systems)
+        self.populate_from_input(systems)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -160,7 +190,7 @@ class LayoutInformationPage(QWidget):
         s = tw.currentText().strip() if isinstance(tw, QComboBox) else ''
         cw = cabin_width_for_load_and_shape(v, s)
         if cw is not None:
-            ww.setText(cw)
+            apply_formula_value(ww, cw)
         self._apply_cabin_depth_for_column(col)
 
     def _apply_cabin_depth_for_column(self, col):
@@ -177,7 +207,7 @@ class LayoutInformationPage(QWidget):
             return
         cd = cabin_depth_for_load_and_width(v, ww.text())
         if cd is not None:
-            dw.setText(cd)
+            apply_formula_value(dw, cd)
         self._sync_derived_fields(col)
 
     def _lift_at_column(self, col):
@@ -256,7 +286,7 @@ class LayoutInformationPage(QWidget):
 
         c_thick = prof.cladding_thickness_mm()
         if c_thick is not None and isinstance(clad_w, QLineEdit):
-            clad_w.setText(c_thick)
+            apply_formula_value(clad_w, c_thick)
         clad = self._cladding_mm(col)
 
         acc_yes = self._accessible_rooms_yes(lift)
@@ -265,52 +295,51 @@ class LayoutInformationPage(QWidget):
 
         ch = prof.clear_cabin_height_mm(cabin_txt)
         if isinstance(clear_w, QLineEdit):
-            clear_w.setText(ch if ch is not None else '')
+            apply_formula_value(clear_w, ch)
 
         clear_txt = clear_w.text() if isinstance(clear_w, QLineEdit) else ''
         sh = prof.structural_cabin_height_mm(clear_txt)
-        if sh is not None and isinstance(struct_w, QLineEdit):
-            struct_w.setText(sh)
-        elif isinstance(struct_w, QLineEdit):
-            struct_w.setText('')
+        if isinstance(struct_w, QLineEdit):
+            apply_formula_value(struct_w, sh)
 
-        dw = prof.door_width_mm(cabin_txt)
-        if dw is not None and isinstance(door_w, QLineEdit):
-            door_w.setText(dw)
+        dw_i = prof.door_width_mm(cabin_txt)
+        if isinstance(door_w, QLineEdit):
+            apply_formula_value(door_w, dw_i)
 
-        if isinstance(door_w, QLineEdit) and isinstance(door_sw, QLineEdit):
+        door_sw_computed: Optional[str] = None
+        if isinstance(door_w, QLineEdit):
             odw = door_w.text().strip()
             try:
                 dv = float(odw.replace(',', '.'))
-                door_sw.setText(str(int(dv + 280)) if dv == int(dv) else str(dv + 280))
+                door_sw_computed = (
+                    str(int(dv + 280)) if dv == int(dv) else str(dv + 280)
+                )
             except ValueError:
-                pass
+                door_sw_computed = None
+        if isinstance(door_sw, QLineEdit):
+            apply_formula_value(door_sw, door_sw_computed)
 
         dhi = prof.door_height_mm(clear_txt)
-        if dhi is not None and isinstance(door_h, QLineEdit):
-            door_h.setText(dhi)
-        elif isinstance(door_h, QLineEdit):
-            door_h.setText('')
+        if isinstance(door_h, QLineEdit):
+            apply_formula_value(door_h, dhi)
 
         door_ht_txt = door_h.text() if isinstance(door_h, QLineEdit) else ''
         dsh = prof.door_structural_opening_height_mm(door_ht_txt)
-        if dsh is not None and isinstance(door_sh, QLineEdit):
-            door_sh.setText(dsh)
-        elif isinstance(door_sh, QLineEdit):
-            door_sh.setText('')
+        if isinstance(door_sh, QLineEdit):
+            apply_formula_value(door_sh, dsh)
 
         dt = prof.door_type_code(cabin_txt, cwt)
-        if dt is not None and isinstance(door_type_w, QLineEdit):
-            door_type_w.setText(dt)
+        if isinstance(door_type_w, QLineEdit):
+            apply_formula_value(door_type_w, dt)
 
         sw = prof.shaft_width_suggested_mm(cabin_txt, clad, acc_yes)
-        if sw is not None and isinstance(shaft_w, QLineEdit):
-            shaft_w.setText(sw)
+        if isinstance(shaft_w, QLineEdit):
+            apply_formula_value(shaft_w, sw)
 
         depth_txt = depth_w.text() if isinstance(depth_w, QLineEdit) else ''
         sd = prof.shaft_depth_suggested_mm(depth_txt, clad, access)
-        if sd is not None and isinstance(shaft_d, QLineEdit):
-            shaft_d.setText(sd)
+        if isinstance(shaft_d, QLineEdit):
+            apply_formula_value(shaft_d, sd)
 
         struct_txt = struct_w.text() if isinstance(struct_w, QLineEdit) else ''
         door_w_txt = door_w.text() if isinstance(door_w, QLineEdit) else ''
@@ -329,11 +358,11 @@ class LayoutInformationPage(QWidget):
             acc_yes,
         )
         if isinstance(shaft_head_w, QLineEdit):
-            shaft_head_w.setText(head_s if head_s is not None else '')
+            apply_formula_value(shaft_head_w, head_s)
 
         pit_s = prof.shaft_pit_suggested_mm(speed_raw)
         if isinstance(shaft_pit_w, QLineEdit):
-            shaft_pit_w.setText(pit_s if pit_s is not None else '')
+            apply_formula_value(shaft_pit_w, pit_s)
 
     def initUI(self):
         self.setMinimumSize(800, 600)
@@ -379,6 +408,11 @@ class LayoutInformationPage(QWidget):
         self.layout_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         system_layout.addWidget(self.layout_table)
+        add_plus_minus_button_row(
+            system_layout,
+            self._on_add_custom_parameter_row,
+            self._on_remove_custom_parameter_row,
+        )
 
         save_button = QPushButton('Save and Proceed')
         save_button.setStyleSheet("background-color: white;")
@@ -415,7 +449,7 @@ class LayoutInformationPage(QWidget):
                     blocked.append(w)
         try:
             for col, system_data in enumerate(systems_data, start=2):
-                for row in range(self.layout_table.rowCount()):
+                for row in range(len(self.LAYOUT_ROWS)):
                     jk = self._layout_json_key_for_row(row)
                     if jk in system_data:
                         cell_widget = self.layout_table.cellWidget(row, col)
@@ -426,17 +460,26 @@ class LayoutInformationPage(QWidget):
                             index = cell_widget.findText(str(value))
                             if index >= 0:
                                 cell_widget.setCurrentIndex(index)
+                for row in range(len(self.LAYOUT_ROWS), self.layout_table.rowCount()):
+                    jk = self._layout_json_key_for_row(row)
+                    if not jk or jk not in system_data:
+                        continue
+                    cell_widget = self.layout_table.cellWidget(row, col)
+                    if isinstance(cell_widget, QLineEdit):
+                        cell_widget.setText(str(system_data[jk]))
         finally:
             for w in blocked:
                 w.blockSignals(False)
 
-        # Only fill in derived values for columns where the saved data did not provide them. A
-        # saved Cabin width (and the rest of the layout block) must never be overwritten by a
-        # formula just because the load capacity changed somewhere else in the project.
+        # Only auto-fill cabin width / depth for columns where the saved data did not provide them.
         for col, system_data in enumerate(systems_data, start=2):
             saved_width = str(system_data.get('Cabin width', '') or '').strip()
             if not saved_width:
                 self._apply_cabin_width_for_column(col)
+
+        # Refresh formula-driven cells: manual values are preserved and flagged when they differ.
+        for col in range(2, self.layout_table.columnCount()):
+            self._sync_derived_fields(col)
 
     def initialize_lift_columns(self):
         for _ in range(self.number_of_lifts):
@@ -449,11 +492,15 @@ class LayoutInformationPage(QWidget):
             col_position, QTableWidgetItem(f'Lift {col_position - 1}')
         )
 
-        for row in range(self.layout_table.rowCount()):
+        for row in range(len(self.LAYOUT_ROWS)):
             if row == self.ROW_CABIN_TYPE:
                 w = OverrideComboBox()
                 w.addItems(['Deep', 'Wide'])
                 w.currentTextChanged.connect(lambda *_a, cp=col_position: self._apply_cabin_width_for_column(cp))
+                # Highlight as a required user-input field; ``set_base_style_sheet``
+                # keeps the green fill while still letting the override (amber)
+                # state win when a non-standard value is entered.
+                w.set_base_style_sheet(REQUIRED_FIELD_COMBO_QSS)
                 widget = w
             elif row == self.ROW_CABIN_WIDTH:
                 widget = QLineEdit()
@@ -500,6 +547,9 @@ class LayoutInformationPage(QWidget):
                 self.ROW_SHAFT_PIT_SUGG,
             ):
                 widget = QLineEdit()
+                widget.textChanged.connect(
+                    lambda *_a, cp=col_position: self._sync_derived_fields(cp)
+                )
             elif row in self._COMBO_OPTIONS:
                 w = OverrideComboBox()
                 w.addItems(self._COMBO_OPTIONS[row])
@@ -513,7 +563,77 @@ class LayoutInformationPage(QWidget):
 
             self.layout_table.setCellWidget(row, col_position, widget)
 
+        for row in range(len(self.LAYOUT_ROWS), self.layout_table.rowCount()):
+            self._fill_custom_layout_value_cell(row, col_position)
+
         self._apply_cabin_width_for_column(col_position)
+
+    def _infer_layout_custom_meta(self, systems: list) -> list:
+        meta = normalize_meta_list(self.user_inputs.get(KEY_CUSTOM_LAYOUT))
+        if meta:
+            return meta
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for sys in systems:
+            if not isinstance(sys, dict):
+                continue
+            for k in sys:
+                if k in self.LAYOUT_FIXED_JSON_KEYS or k in seen:
+                    continue
+                seen.add(k)
+                ordered.append(k)
+        return [{"name": k, "unit": ""} for k in ordered]
+
+    def _fill_custom_layout_value_cell(self, row: int, col: int) -> None:
+        w = QLineEdit()
+        self.layout_table.setCellWidget(row, col, w)
+
+    def _rebuild_custom_layout_rows(self, systems: list) -> None:
+        clear_rows_from(self.layout_table, len(self.LAYOUT_ROWS))
+        meta = self._infer_layout_custom_meta(systems)
+        used: set[str] = set()
+        for entry in meta:
+            raw_name = str(entry.get("name", "") or "").strip()
+            unit = str(entry.get("unit", "") or "").strip()
+            name = raw_name if raw_name else default_custom_name(used)
+            used.add(name)
+            append_custom_row_two_column_headers(
+                self.layout_table,
+                name=name,
+                unit=unit,
+                first_data_col=2,
+                fill_data_cell=self._fill_custom_layout_value_cell,
+            )
+
+    def _on_add_custom_parameter_row(self) -> None:
+        used: set[str] = set()
+        for r in range(len(self.LAYOUT_ROWS), self.layout_table.rowCount()):
+            w = self.layout_table.cellWidget(r, 0)
+            if isinstance(w, QLineEdit) and w.text().strip():
+                used.add(w.text().strip())
+        name = default_custom_name(used)
+        append_custom_row_two_column_headers(
+            self.layout_table,
+            name=name,
+            unit="",
+            first_data_col=2,
+            fill_data_cell=self._fill_custom_layout_value_cell,
+        )
+
+    def _on_remove_custom_parameter_row(self) -> None:
+        fixed = len(self.LAYOUT_ROWS)
+        if self.layout_table.rowCount() <= fixed:
+            return
+        self.layout_table.removeRow(self.layout_table.rowCount() - 1)
+        building = self.user_inputs.get('BuildingSystems') or []
+        if len(building) > 0:
+            self.merge_layout_into_lift_systems()
+        else:
+            self.user_inputs[KEY_CUSTOM_LAYOUT] = meta_from_table(
+                self.layout_table,
+                fixed_row_count=fixed,
+                has_unit_column=True,
+            )
 
     def merge_layout_into_lift_systems(self):
         """Write layout table columns into ``user_inputs['LayoutInformation']`` (one dict per lift)."""
@@ -532,6 +652,8 @@ class LayoutInformationPage(QWidget):
             if col < self.layout_table.columnCount():
                 for row in range(self.layout_table.rowCount()):
                     jk = self._layout_json_key_for_row(row)
+                    if not jk:
+                        continue
                     cell_widget = self.layout_table.cellWidget(row, col)
                     if isinstance(cell_widget, QLineEdit):
                         value = cell_widget.text()
@@ -557,6 +679,11 @@ class LayoutInformationPage(QWidget):
             systems_data.append(merged)
 
         self.user_inputs[KEY_LAYOUT_INFORMATION] = systems_data
+        self.user_inputs[KEY_CUSTOM_LAYOUT] = meta_from_table(
+            self.layout_table,
+            fixed_row_count=len(self.LAYOUT_ROWS),
+            has_unit_column=True,
+        )
 
     def collect_data_and_go_next(self):
         self.merge_layout_into_lift_systems()

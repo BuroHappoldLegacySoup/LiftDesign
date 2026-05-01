@@ -9,11 +9,22 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QDoubleValidator, QShowEvent
+import copy
 import os
 import sys
 
+from .formula_line_edit import apply_formula_value
 from .override_combobox import OverrideComboBox
 from .project_lift_schema import merged_lift_at, normalize_project_lift_data
+from .custom_parameter_rows import (
+    KEY_CUSTOM_LIFT_DRIVE,
+    add_plus_minus_button_row,
+    append_custom_row_two_column_headers,
+    clear_rows_from,
+    default_custom_name,
+    meta_from_table,
+    normalize_meta_list,
+)
 
 try:
     from .lift_types import ELECTRICAL_HVAC_DEFAULTS, electrical_hvac_derived_for_lift
@@ -51,6 +62,7 @@ class LiftDriveControlPage(QWidget):
     )
 
     DESCRIPTIONS = tuple(r[0] for r in LIFT_DRIVE_ROWS)
+    LIFT_DRIVE_FIXED_KEYS = frozenset(DESCRIPTIONS)
 
     _COMPUTED_VALUE_KEYS = frozenset(
         {
@@ -77,6 +89,12 @@ class LiftDriveControlPage(QWidget):
         "Power grid voltage/type": ("Power network", "Power grid voltage/type (V)"),
     }
 
+    def _lift_drive_json_key_for_row(self, row: int) -> str:
+        if row < len(self.LIFT_DRIVE_ROWS):
+            return self.DESCRIPTIONS[row]
+        w = self.system_table.cellWidget(row, 0)
+        return w.text().strip() if isinstance(w, QLineEdit) else ""
+
     def __init__(self, user_inputs):
         super().__init__()
         self.user_inputs = user_inputs
@@ -84,8 +102,13 @@ class LiftDriveControlPage(QWidget):
         self.number_of_lifts = len(user_inputs["BuildingSystems"])
         self.initUI()
 
-        if "LiftDrive" in self.user_inputs:
-            self.populate_from_input(self.user_inputs["LiftDrive"])
+        drive = copy.deepcopy(self.user_inputs.get("LiftDrive") or [])
+        while len(drive) < self.number_of_lifts:
+            drive.append({})
+        while len(drive) > self.number_of_lifts:
+            drive.pop()
+        self._rebuild_custom_lift_drive_rows(drive)
+        self.populate_from_input(drive)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -160,6 +183,11 @@ class LiftDriveControlPage(QWidget):
         self.system_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         system_layout.addWidget(self.system_table)
+        add_plus_minus_button_row(
+            system_layout,
+            self._on_add_custom_parameter_row,
+            self._on_remove_custom_parameter_row,
+        )
 
         save_button = QPushButton("Save and Proceed")
         save_button.setStyleSheet("background-color: white;")
@@ -177,7 +205,7 @@ class LiftDriveControlPage(QWidget):
 
     def populate_from_input(self, drive_data):
         for col, system_data in enumerate(drive_data, start=2):
-            for row in range(self.system_table.rowCount()):
+            for row in range(len(self.LIFT_DRIVE_ROWS)):
                 jk = self.DESCRIPTIONS[row]
                 value = self._cell_value_for_description(system_data, jk)
                 if value is None:
@@ -191,6 +219,16 @@ class LiftDriveControlPage(QWidget):
                         cell_widget.setCurrentIndex(index)
                 elif row == self.ROW_ENERGY_RECOVERY and isinstance(cell_widget, QCheckBox):
                     cell_widget.setChecked(str(value).lower() in ("yes", "true", "1"))
+            for row in range(len(self.LIFT_DRIVE_ROWS), self.system_table.rowCount()):
+                jk = self._lift_drive_json_key_for_row(row)
+                if not jk:
+                    continue
+                value = self._cell_value_for_description(system_data, jk)
+                if value is None:
+                    continue
+                cell_widget = self.system_table.cellWidget(row, col)
+                if isinstance(cell_widget, QLineEdit):
+                    cell_widget.setText(str(value))
             self._apply_defaults_for_column(col, overwrite_empty_only=True)
             self._apply_computed_for_column(col)
 
@@ -199,7 +237,7 @@ class LiftDriveControlPage(QWidget):
             self.add_lift_column()
 
     def _apply_defaults_for_column(self, col, overwrite_empty_only=False):
-        for row in range(self.system_table.rowCount()):
+        for row in range(len(self.LIFT_DRIVE_ROWS)):
             jk = self.DESCRIPTIONS[row]
             w = self.system_table.cellWidget(row, col)
             if jk in ELECTRICAL_HVAC_DEFAULTS:
@@ -223,7 +261,7 @@ class LiftDriveControlPage(QWidget):
             col_position, QTableWidgetItem(f"Lift {col_position - 1}")
         )
 
-        for row in range(self.system_table.rowCount()):
+        for row in range(len(self.LIFT_DRIVE_ROWS)):
             if row == self.ROW_DRIVE_MOTOR_LOCATION:
                 widget = self._choice_combo(
                     [
@@ -243,6 +281,10 @@ class LiftDriveControlPage(QWidget):
                 widget.setValidator(QDoubleValidator())
                 if row == self.ROW_DUTY_CYCLE:
                     widget.textChanged.connect(lambda *_a, cp=col_position: self._apply_computed_for_column(cp))
+                elif self.DESCRIPTIONS[row] in self._COMPUTED_VALUE_KEYS:
+                    widget.textChanged.connect(
+                        lambda *_a, cp=col_position: self._apply_computed_for_column(cp)
+                    )
             else:
                 widget = QLineEdit()
 
@@ -251,8 +293,70 @@ class LiftDriveControlPage(QWidget):
 
             self.system_table.setCellWidget(row, col_position, widget)
 
+        for row in range(len(self.LIFT_DRIVE_ROWS), self.system_table.rowCount()):
+            self._fill_custom_lift_drive_cell(row, col_position)
+
         self._apply_defaults_for_column(col_position, overwrite_empty_only=False)
         self._apply_computed_for_column(col_position)
+
+    def _infer_lift_drive_custom_meta(self, drive_list: list) -> list:
+        meta = normalize_meta_list(self.user_inputs.get(KEY_CUSTOM_LIFT_DRIVE))
+        if meta:
+            return meta
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for entry in drive_list:
+            if not isinstance(entry, dict):
+                continue
+            for k in entry:
+                if k in self.LIFT_DRIVE_FIXED_KEYS or k in seen:
+                    continue
+                seen.add(k)
+                ordered.append(k)
+        return [{"name": k, "unit": ""} for k in ordered]
+
+    def _fill_custom_lift_drive_cell(self, row: int, col: int) -> None:
+        w = QLineEdit()
+        w.setValidator(QDoubleValidator())
+        self.system_table.setCellWidget(row, col, w)
+
+    def _rebuild_custom_lift_drive_rows(self, drive_list: list) -> None:
+        clear_rows_from(self.system_table, len(self.LIFT_DRIVE_ROWS))
+        meta = self._infer_lift_drive_custom_meta(drive_list)
+        used: set[str] = set()
+        for entry in meta:
+            raw_name = str(entry.get("name", "") or "").strip()
+            unit = str(entry.get("unit", "") or "").strip()
+            name = raw_name if raw_name else default_custom_name(used)
+            used.add(name)
+            append_custom_row_two_column_headers(
+                self.system_table,
+                name=name,
+                unit=unit,
+                first_data_col=2,
+                fill_data_cell=self._fill_custom_lift_drive_cell,
+            )
+
+    def _on_add_custom_parameter_row(self) -> None:
+        used: set[str] = set()
+        for r in range(len(self.LIFT_DRIVE_ROWS), self.system_table.rowCount()):
+            w = self.system_table.cellWidget(r, 0)
+            if isinstance(w, QLineEdit) and w.text().strip():
+                used.add(w.text().strip())
+        name = default_custom_name(used)
+        append_custom_row_two_column_headers(
+            self.system_table,
+            name=name,
+            unit="",
+            first_data_col=2,
+            fill_data_cell=self._fill_custom_lift_drive_cell,
+        )
+
+    def _on_remove_custom_parameter_row(self) -> None:
+        if self.system_table.rowCount() <= len(self.LIFT_DRIVE_ROWS):
+            return
+        self.system_table.removeRow(self.system_table.rowCount() - 1)
+        self.sync_lift_drive_to_user_inputs()
 
     def _apply_computed_for_column(self, col):
         idx = col - 2
@@ -264,27 +368,41 @@ class LiftDriveControlPage(QWidget):
         duty_w = self.system_table.cellWidget(self.ROW_DUTY_CYCLE, col)
         duty_txt = duty_w.text() if isinstance(duty_w, QLineEdit) else ""
 
-        derived = electrical_hvac_derived_for_lift(load, persons, duty_txt)
         key_to_row = {d: i for i, d in enumerate(self.DESCRIPTIONS)}
-        computed_keys = tuple(sorted(self._COMPUTED_VALUE_KEYS))
-        lift_drive = self.user_inputs.get("LiftDrive") or []
-        for key in computed_keys:
+        _blocked = []
+        for key in self._COMPUTED_VALUE_KEYS:
             r = key_to_row.get(key)
             if r is None:
                 continue
-            w = self.system_table.cellWidget(r, col)
-            if not isinstance(w, QLineEdit):
-                continue
-            if key in derived:
-                w.setText(derived[key])
-            else:
-                stored = None
-                if 0 <= idx < len(lift_drive) and isinstance(lift_drive[idx], dict):
-                    stored = self._cell_value_for_description(lift_drive[idx], key)
-                if stored is not None and str(stored).strip() != "":
-                    w.setText(str(stored))
+            ww = self.system_table.cellWidget(r, col)
+            if isinstance(ww, QLineEdit):
+                ww.blockSignals(True)
+                _blocked.append(ww)
+        try:
+            derived = electrical_hvac_derived_for_lift(load, persons, duty_txt)
+            computed_keys = tuple(sorted(self._COMPUTED_VALUE_KEYS))
+            lift_drive = self.user_inputs.get("LiftDrive") or []
+            for key in computed_keys:
+                r = key_to_row.get(key)
+                if r is None:
+                    continue
+                w = self.system_table.cellWidget(r, col)
+                if not isinstance(w, QLineEdit):
+                    continue
+                if key in derived:
+                    apply_formula_value(w, derived[key])
                 else:
-                    w.setText("")
+                    stored = None
+                    if 0 <= idx < len(lift_drive) and isinstance(lift_drive[idx], dict):
+                        stored = self._cell_value_for_description(lift_drive[idx], key)
+                    if stored is not None and str(stored).strip() != "":
+                        w.setText(str(stored))
+                    else:
+                        w.setText("")
+                    apply_formula_value(w, None)
+        finally:
+            for ww in _blocked:
+                ww.blockSignals(False)
 
     def sync_lift_drive_to_user_inputs(self):
         """Write Electrical & HVAC table into ``user_inputs``."""
@@ -294,7 +412,9 @@ class LiftDriveControlPage(QWidget):
             idx = col - 2
             merged = dict(existing[idx]) if idx < len(existing) and isinstance(existing[idx], dict) else {}
             for row in range(self.system_table.rowCount()):
-                jk = self.DESCRIPTIONS[row]
+                jk = self._lift_drive_json_key_for_row(row)
+                if not jk:
+                    continue
                 cell_widget = self.system_table.cellWidget(row, col)
                 if isinstance(cell_widget, QLineEdit):
                     value = cell_widget.text()
@@ -324,6 +444,11 @@ class LiftDriveControlPage(QWidget):
             systems_data.append(merged)
 
         self.user_inputs["LiftDrive"] = systems_data
+        self.user_inputs[KEY_CUSTOM_LIFT_DRIVE] = meta_from_table(
+            self.system_table,
+            fixed_row_count=len(self.LIFT_DRIVE_ROWS),
+            has_unit_column=True,
+        )
 
     def collect_data_and_go_next(self):
         self.sync_lift_drive_to_user_inputs()

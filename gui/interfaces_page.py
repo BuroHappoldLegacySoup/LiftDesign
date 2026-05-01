@@ -4,10 +4,20 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QDoubleValidator
 from PyQt5.QtCore import pyqtSignal, Qt
+import copy
 import sys
 
 from .override_combobox import OverrideComboBox
 from .project_lift_schema import LEGACY_EMERGENCY_KEY_TO_CANONICAL
+from .custom_parameter_rows import (
+    KEY_CUSTOM_EMERGENCY,
+    add_plus_minus_button_row,
+    append_custom_row_two_column_headers,
+    clear_rows_from,
+    default_custom_name,
+    meta_from_table,
+    normalize_meta_list,
+)
 
 
 class InterfacesPage(QWidget):
@@ -58,14 +68,27 @@ class InterfacesPage(QWidget):
         ('other functions', 'other functions', 'type'),
     )
 
+    EMERGENCY_FIXED_KEYS = frozenset(r[0] for r in EMERGENCY_ROWS)
+
+    def _emergency_json_key_for_row(self, row: int) -> str:
+        if row < len(self.EMERGENCY_ROWS):
+            return self.EMERGENCY_ROWS[row][0]
+        w = self.interfaces_table.cellWidget(row, 0)
+        return w.text().strip() if isinstance(w, QLineEdit) else ""
+
     def __init__(self, user_inputs):
         super().__init__()
         self.user_inputs = user_inputs
         self.number_of_lifts = len(user_inputs['BuildingSystems'])
         self.initUI()
 
-        if 'Emergency' in self.user_inputs:
-            self.populate_from_input(self.user_inputs['Emergency'])
+        emergency = copy.deepcopy(self.user_inputs.get('Emergency') or [])
+        while len(emergency) < self.number_of_lifts:
+            emergency.append({})
+        while len(emergency) > self.number_of_lifts:
+            emergency.pop()
+        self._rebuild_custom_emergency_rows(emergency)
+        self.populate_from_input(emergency)
 
     @staticmethod
     def _choice_combo(items: tuple[str, ...]) -> QComboBox:
@@ -119,6 +142,11 @@ class InterfacesPage(QWidget):
         self.interfaces_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
         interfaces_layout.addWidget(self.interfaces_table)
+        add_plus_minus_button_row(
+            interfaces_layout,
+            self._on_add_custom_parameter_row,
+            self._on_remove_custom_parameter_row,
+        )
 
         save_button = QPushButton('Save and Proceed')
         save_button.setStyleSheet("background-color: white;")
@@ -145,7 +173,7 @@ class InterfacesPage(QWidget):
             col_position, QTableWidgetItem(f'Lift {col_position - 1}')
         )
 
-        for row in range(self.interfaces_table.rowCount()):
+        for row in range(len(self.EMERGENCY_ROWS)):
             if row in self._ROW_COMBO_YES_NO:
                 w = self._choice_combo(self._YES_NO_ITEMS)
                 w.set_override_context(self.EMERGENCY_ROWS[row][1], col_position - 2)
@@ -159,6 +187,67 @@ class InterfacesPage(QWidget):
             else:
                 w = QLineEdit()
             self.interfaces_table.setCellWidget(row, col_position, w)
+
+        for row in range(len(self.EMERGENCY_ROWS), self.interfaces_table.rowCount()):
+            self._fill_custom_emergency_cell(row, col_position)
+
+    def _infer_emergency_custom_meta(self, emergency_list: list) -> list:
+        meta = normalize_meta_list(self.user_inputs.get(KEY_CUSTOM_EMERGENCY))
+        if meta:
+            return meta
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for entry in emergency_list:
+            if not isinstance(entry, dict):
+                continue
+            for k in entry:
+                if k in self.EMERGENCY_FIXED_KEYS or k in seen:
+                    continue
+                seen.add(k)
+                ordered.append(k)
+        return [{"name": k, "unit": ""} for k in ordered]
+
+    def _fill_custom_emergency_cell(self, row: int, col: int) -> None:
+        w = QLineEdit()
+        self.interfaces_table.setCellWidget(row, col, w)
+
+    def _rebuild_custom_emergency_rows(self, emergency_list: list) -> None:
+        clear_rows_from(self.interfaces_table, len(self.EMERGENCY_ROWS))
+        meta = self._infer_emergency_custom_meta(emergency_list)
+        used: set[str] = set()
+        for entry in meta:
+            raw_name = str(entry.get("name", "") or "").strip()
+            unit = str(entry.get("unit", "") or "").strip()
+            name = raw_name if raw_name else default_custom_name(used)
+            used.add(name)
+            append_custom_row_two_column_headers(
+                self.interfaces_table,
+                name=name,
+                unit=unit,
+                first_data_col=2,
+                fill_data_cell=self._fill_custom_emergency_cell,
+            )
+
+    def _on_add_custom_parameter_row(self) -> None:
+        used: set[str] = set()
+        for r in range(len(self.EMERGENCY_ROWS), self.interfaces_table.rowCount()):
+            w = self.interfaces_table.cellWidget(r, 0)
+            if isinstance(w, QLineEdit) and w.text().strip():
+                used.add(w.text().strip())
+        name = default_custom_name(used)
+        append_custom_row_two_column_headers(
+            self.interfaces_table,
+            name=name,
+            unit="",
+            first_data_col=2,
+            fill_data_cell=self._fill_custom_emergency_cell,
+        )
+
+    def _on_remove_custom_parameter_row(self) -> None:
+        if self.interfaces_table.rowCount() <= len(self.EMERGENCY_ROWS):
+            return
+        self.interfaces_table.removeRow(self.interfaces_table.rowCount() - 1)
+        self.sync_emergency_to_user_inputs()
 
     @staticmethod
     def _combo_in_cell(cell_widget):
@@ -219,7 +308,7 @@ class InterfacesPage(QWidget):
 
     def populate_from_input(self, emergency_data):
         for col, emergency_entry in enumerate(emergency_data, start=2):
-            for row in range(self.interfaces_table.rowCount()):
+            for row in range(len(self.EMERGENCY_ROWS)):
                 jk = self.EMERGENCY_ROWS[row][0]
                 value = self._value_for_description(emergency_entry, jk)
                 if value is None:
@@ -236,6 +325,16 @@ class InterfacesPage(QWidget):
                         self._set_power_type_combo(cb, value)
                 elif isinstance(cell_widget, QLineEdit):
                     cell_widget.setText(str(value))
+            for row in range(len(self.EMERGENCY_ROWS), self.interfaces_table.rowCount()):
+                jk = self._emergency_json_key_for_row(row)
+                if not jk:
+                    continue
+                value = self._value_for_description(emergency_entry, jk)
+                if value is None:
+                    continue
+                cell_widget = self.interfaces_table.cellWidget(row, col)
+                if isinstance(cell_widget, QLineEdit):
+                    cell_widget.setText(str(value))
 
     def sync_emergency_to_user_inputs(self):
         """Write technical interfaces table into ``user_inputs``."""
@@ -243,10 +342,14 @@ class InterfacesPage(QWidget):
         for col in range(2, self.interfaces_table.columnCount()):
             emergency_entry = {}
             for row in range(self.interfaces_table.rowCount()):
-                jk = self.EMERGENCY_ROWS[row][0]
+                jk = self._emergency_json_key_for_row(row)
+                if not jk:
+                    continue
                 cell_widget = self.interfaces_table.cellWidget(row, col)
 
-                if row in self._ROW_COMBO_YES_NO or row in self._ROW_COMBO_POWER_TYPE:
+                if row < len(self.EMERGENCY_ROWS) and (
+                    row in self._ROW_COMBO_YES_NO or row in self._ROW_COMBO_POWER_TYPE
+                ):
                     cb = self._combo_in_cell(cell_widget)
                     value = cb.currentText() if cb is not None else ''
                 elif isinstance(cell_widget, QLineEdit):
@@ -259,6 +362,11 @@ class InterfacesPage(QWidget):
             emergency_data.append(emergency_entry)
 
         self.user_inputs['Emergency'] = emergency_data
+        self.user_inputs[KEY_CUSTOM_EMERGENCY] = meta_from_table(
+            self.interfaces_table,
+            fixed_row_count=len(self.EMERGENCY_ROWS),
+            has_unit_column=True,
+        )
 
     def collect_data_and_go_next(self):
         self.sync_emergency_to_user_inputs()
