@@ -24,6 +24,7 @@ from __future__ import annotations
 import csv
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple, Union
 
@@ -42,6 +43,7 @@ __all__ = [
     "write_ld_exports_per_group",
     "write_ld_csv",
     "export_ld_data_import_test",
+    "project_resource_dir",
     "default_vt_workbook_path",
     "default_ld_empty_template_path",
     "default_ld_example_path",
@@ -49,6 +51,28 @@ __all__ = [
 ]
 
 Number = Union[int, float]
+
+
+def project_resource_dir() -> str:
+    """
+    Directory that holds shipped ``.xlsx`` workbooks next to the Python sources.
+
+    When running under PyInstaller (``--onefile``), bundled data files are
+    extracted to :attr:`sys._MEIPASS`; this returns that folder so template
+    paths resolve correctly.
+    """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _default_ld_test_output_path() -> str:
+    """Default ``LD data import test.xlsx`` path — writable when frozen (not inside the bundle)."""
+    if getattr(sys, "frozen", False):
+        base = os.path.join(os.path.expanduser("~"), "Documents")
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, "LD data import test.xlsx")
 
 
 @dataclass(frozen=True)
@@ -73,15 +97,15 @@ class VTExportRule:
 
 
 def default_vt_workbook_path() -> str:
-    return os.path.join(os.path.dirname(__file__), "VT standard configurations_V00.xlsx")
+    return os.path.join(project_resource_dir(), "VT standard configurations_V00.xlsx")
 
 
 def default_ld_empty_template_path() -> str:
-    return os.path.join(os.path.dirname(__file__), "LD Export Empty file.xlsx")
+    return os.path.join(project_resource_dir(), "LD Export Empty file.xlsx")
 
 
 def default_ld_example_path() -> str:
-    return os.path.join(os.path.dirname(__file__), "LD example data import.xlsx")
+    return os.path.join(project_resource_dir(), "LD example data import.xlsx")
 
 
 def _s(v: Any) -> str:
@@ -1205,7 +1229,7 @@ def export_ld_data_import_test(
     Write ``LD data import test.xlsx`` next to this module (or ``output_path``).
     Returns the path written.
     """
-    out = output_path or os.path.join(os.path.dirname(__file__), "LD data import test.xlsx")
+    out = output_path or _default_ld_test_output_path()
     rows = build_ld_rows_from_user_inputs(
         user_inputs,
         lift_index=lift_index,
@@ -1277,7 +1301,7 @@ if __name__ == "__main__":
                 "Floors": [{"Lift 1": []}],
             }
 
-    out = args.output or os.path.join(os.path.dirname(__file__), "LD data import test.xlsx")
+    out = args.output or _default_ld_test_output_path()
     if args.all_lifts:
         try:
             from gui.project_lift_schema import KEY_LIFT_COLUMN_GROUPS
