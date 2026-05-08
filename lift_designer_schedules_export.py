@@ -50,6 +50,7 @@ from lift_designer_ld_export import (
     _lift,
     _value_for_param,
     default_vt_workbook_path,
+    project_resource_dir,
 )
 from lift_designer_vt_derived import compute_derived
 
@@ -534,7 +535,7 @@ def default_schedule_template_path() -> str:
     next to this module. Raises :class:`FileNotFoundError` if none of the known
     template filenames can be located.
     """
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = project_resource_dir()
     for name in _TEMPLATE_FILENAMES:
         p = os.path.join(base_dir, name)
         if os.path.isfile(p):

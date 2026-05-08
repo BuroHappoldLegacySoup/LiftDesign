@@ -9,6 +9,16 @@ script_dir = os.path.dirname(os.path.realpath(__file__))
 # Get the path to the user's desktop
 desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
 
+# Ship Excel templates next to extracted modules at runtime (sys._MEIPASS).
+# Windows: --add-data uses ``src;dest`` with ``.`` = bundle root.
+_bundle_xlsx = (
+    "xxxxxxx_template_VT Schedules V3.0_de_en.xlsx",
+    "VT Schedules template.xlsx",
+    "VT standard configurations_V00.xlsx",
+    "LD Export Empty file.xlsx",
+    "LD example data import.xlsx",
+)
+
 command = [
     sys.executable,
     '-m',
@@ -20,9 +30,15 @@ command = [
     '--exclude-module', '__pycache__',
     '--exclude', '.gitignore',
     '--clean',  # Clean PyInstaller cache and remove temporary files
-    os.path.join(script_dir, 'gui.py'),
-    '--distpath', desktop_dir
 ]
+for name in _bundle_xlsx:
+    src = os.path.join(script_dir, name)
+    if os.path.isfile(src):
+        command.extend(["--add-data", f"{src};."])
+command.extend([
+    os.path.join(script_dir, 'gui.py'),
+    '--distpath', desktop_dir,
+])
 
 # Create a .spec file to have more control over the build process
 spec_content = """
