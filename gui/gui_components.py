@@ -1,13 +1,15 @@
 import re
 from PyQt5.QtWidgets import QWidget, QLabel, QLineEdit, QComboBox, QCheckBox, QHBoxLayout
 from PyQt5.QtGui import QDoubleValidator
+from .override_combobox import OverrideComboBox
 
 class GuiComponents:
     def add_combobox(self, layout, label, options):
         widget = QWidget()
         widget_layout = QHBoxLayout()
-        input_box = QComboBox()
+        input_box = OverrideComboBox()
         input_box.addItems(options)
+        input_box.set_override_context(label, -1)
         widget_layout.addWidget(QLabel(label))
         widget_layout.addWidget(input_box)
         widget.setLayout(widget_layout)

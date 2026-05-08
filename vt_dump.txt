@@ -1,0 +1,77 @@
+﻿3 | Configuration short name | No
+4 | System name | Shaft0.L_SystemTab.SYS_ELEV_DESC
+5 | Building part | No
+6 | Buidlign section | no
+7 | Grid position | no
+8 | Plan code | no
+9 | Drawing No.: internal | no
+11 | System category | no
+12 | Functions | no
+13 | Construction use | no
+14 | Brand | no
+15 | Factory number | no
+17 | General Specification | None
+18 | Group Control | no
+19 | Counterweight location | yes, info
+20 | Load capacity | Shaft0.L_SystemTab.SYS_ENTERED_LOAD
+21 | Permissible number of persons | Shaft0.L_SystemTab.SYS_ENTERED_PERSON
+22 | Speed | Shaft0.L_SystemTab.SYS_TRAVEL_SPEED_UP
+23 | Acceleration | no
+24 | Jerk | no
+25 | Travel height | no
+26 | Stops | None
+27 | Number of floors | FLL.FLL_COUNT
+28 | Number of shaft doors | no
+29 | Access type | yes, info
+30 | Accessible rooms / cwt safety | no
+32 | Layout Information | None
+33 | Cabin type/shape | no
+34 | Cabin width (clear) | Shaft0.Car.CW
+35 | Cabin depth (clear) | Shaft0.Car.CD
+36 | Cladding thickness each wall | -
+37 | Clear cabin height | no
+38 | Structural cabin height | Shaft0.Car.HEIGHT
+39 | T▄REINZUG VORNE | None
+40 | MUZ??? | None
+41 | Door width | yes, info
+42 | Door structural opening width | Shaft0.Entries1.E0.Opening.T_AUSBR_B
+43 | Door height | yes, info
+44 | Door structural opening height | yes, info
+45 | Door type | yes, info
+46 | Door fixation type | yes, info
+47 | Permissible sill load / Loading class | no
+48 | LOP type and location | yes, info
+49 | LIP type and location | yes, info
+50 | Lift maintenance panel type | yes, info
+51 | Lift maintenance panel location | yes, info
+52 | KABINENGRUNDFL─CHE | None
+53 | Shaft equipment fixation type | yes, info
+54 | Shaft width suggested | yes, info
+55 | Shaft width current planning | None
+56 | Shaft division type | yes, info
+57 | Shaft division width | yes, info
+58 | Shaft depth suggested | yes, info
+59 | Shaft depth current planning | None
+60 | Shaft head suggested | Shaft0.HEAD
+61 | Shaft head current planning | None
+62 | Shaft pit suggested | Shaft0.PIT
+63 | Shaft pit current planning | None
+64 | Machine room width suggested | yes,info
+65 | Machine room width current planning | None
+66 | Machine room width suggested | yes, info
+67 | Machine room width current planning | None
+68 | Machine room height suggested | yes, info
+69 | Machine room height current planning | None
+70 | Lift vestibule width | no
+71 | Lift vestibule depth | no
+73 | Electrical & HVAC | None
+74 | Drive/Motor location | yes, info
+75 | Control / Operation panel location | yes, info
+76 | Number of trips per hour | no
+77 | Drive/Motor type | no
+78 | Power grid voltage/type | no
+79 | Duty cycle (motor) | no
+80 | Drive/Motor Power | no
+81 | Connected load | L_Projects.PROJ_USER_0
+82 | Rated current | L_Projects.PROJ_USER_2
+83 | 

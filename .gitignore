@@ -1,3 +1,4 @@
 .venv/Lib/site-packages/PyQt5/uic/__pycache__/__init__.cpython-312.pyc
 /.venv
 *.pyc
+/build

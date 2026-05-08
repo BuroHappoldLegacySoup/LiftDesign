@@ -1,5 +1,7 @@
 import os
+import shutil
 import subprocess
+import sys
 
 # Get the path to the current script's directory
 script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -8,7 +10,9 @@ script_dir = os.path.dirname(os.path.realpath(__file__))
 desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
 
 command = [
-    'pyinstaller',
+    sys.executable,
+    '-m',
+    'PyInstaller',
     '--noconfirm',
     '--onefile',
     '--noconsole',
@@ -86,9 +90,9 @@ if result.returncode == 0:
     for directory in directories_to_clean:
         if os.path.exists(directory):
             try:
-                subprocess.run(['rm', '-rf', directory] if os.name != 'nt' else ['rmdir', '/S', '/Q', directory])
+                shutil.rmtree(directory)
                 print(f"Cleaned up {directory} directory")
-            except Exception as e:
+            except OSError as e:
                 print(f"Error cleaning {directory}: {e}")
     
     for file in files_to_clean:

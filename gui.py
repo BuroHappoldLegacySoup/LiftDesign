@@ -1,4 +1,12 @@
 # gui.py
+import sys
+from pathlib import Path
+
+# Ensure project root is on sys.path (fixes "No module named 'gui'" when cwd differs)
+_root = Path(__file__).resolve().parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
 from gui.main_window import MainWindow
 from gui.initial_page import InitialPage
 from PyQt5.QtWidgets import QApplication
@@ -21,7 +29,7 @@ def main():
     
     initial_window.project_selected.connect(handle_project_selection)
     
-    # Show initial window
+    # Show initial window   
     initial_window.show()
     
     app.exec_()
